@@ -62,6 +62,10 @@ ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
 SRCCLI += input/avs.c
 endif
 
+ifneq ($(findstring HAVE_VPY 1, $(CONFIG)),)
+SRCCLI += input/vpy.c
+endif
+
 ifneq ($(findstring HAVE_THREAD 1, $(CONFIG)),)
 SRCS_X   += common/threadpool.c
 SRCCLI_X += input/thread.c
@@ -360,7 +364,7 @@ ifeq (,$(VIDS))
 fprofiled:
 	@echo 'usage: make fprofiled VIDS="infile1 infile2 ..."'
 	@echo 'where infiles are anything that x264 understands,'
-	@echo 'i.e. YUV with resolution in the filename, y4m, or avisynth.'
+	@echo 'i.e. YUV with resolution in the filename, y4m, avs or vpy.'
 else
 fprofiled: clean
 	$(MAKE) x264$(EXE) CFLAGSPROF="$(PROF_GEN_CC)" LDFLAGSPROF="$(PROF_GEN_LD)"
