@@ -1657,8 +1657,6 @@ generic_option:
         return -1;
     FAIL_IF_ERROR( cli_output.open_file( output_filename, &opt->hout, &output_opt ), "could not open output file `%s'\n", output_filename );
 
-    x264_cli_log("x264", X264_LOG_INFO, "core:%d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION);
-
     input_filename = argv[optind++];
     video_info_t info = {0};
     char demuxername[5];
