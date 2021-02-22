@@ -1691,9 +1691,8 @@ generic_option:
 
     x264_reduce_fraction( &info.sar_width, &info.sar_height );
     x264_reduce_fraction( &info.fps_num, &info.fps_den );
-    x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d %u:%u @ %u/%u fps (%cfr)\n", info.width,
-                  info.height, info.sar_width, info.sar_height,
-                  info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
+    x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d @ %u/%u fps (%cfr)\n", info.width,
+                  info.height, info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
     x264_cli_log(demuxername, X264_LOG_INFO, "color matrix: %s\n",
     strtable_lookup(x264_colmatrix_names, shown_colormatrix));
 
@@ -1956,7 +1955,7 @@ static int64_t print_status( int64_t i_start, int64_t i_previous, int i_frame, i
         estsz_prec = estsz < 1024000 ? 2 : estsz < 10240000 ? 1 : 0;
         estsz_num = estsz < 1024 ? estsz : estsz < 1048576 ? estsz / 1024 : estsz / 1048576;
         estsz_unit = estsz < 1024 ? "K" : estsz < 1048576 ? "M" : "G";
-        sprintf(buf, "x264 [%.1f%%] %d/%d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d (-%d:%02d:%02d) | %.*f %sB (%.*f %sB)",
+        sprintf(buf, "x264 [%.1f%%] %d/%d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
                 percentage, i_frame, i_frame_total, fps_prec, fps, bitrate_prec, bitrate,
                 ete_hh, ete_mm, ete_ss,
                 eta_hh, eta_mm, eta_ss,
