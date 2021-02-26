@@ -1,10 +1,10 @@
 /*****************************************************************************
  * vpy.c: VapourSynth input
  *****************************************************************************
- * Copyright (C) 2009-2018 x264 project
+ * Copyright (C) 2009-2021 x264 project
  *
  * Author: Vladimir Kontserenko <djatom@beatrice-raws.org>
- * Some portions of code and ideas taken for avs.c, y4m.c files, "ffmpeg demuxer" 
+ * Some portions of code and ideas taken from avs.c, y4m.c files, "ffmpeg demuxer"
  * proposed at doom9 thread and from rigaya's NVEnc codebase.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -26,7 +26,15 @@
  *****************************************************************************/
 
 #include "input.h"
+
+#ifdef _MSC_VER
+typedef intptr_t atomic_int;
+#define atomic_load(object) _InterlockedCompareExchange64(object, 0, 0)
+#define atomic_fetch_add(object, operand) _InterlockedExchangeAdd64(object, operand)
+#define atomic_fetch_sub(object, operand) _InterlockedExchangeAdd64(object, -(operand))
+#else
 #include <stdatomic.h>
+#endif
 #include "extras/VSScript.h"
 #include "extras/VSHelper.h"
 
@@ -36,27 +44,26 @@
 #define VPY_X64 1
 #endif
 
-#ifdef __unix__
+#ifdef _WIN32
+typedef WCHAR libp_t;
+#define vs_open(library) LoadLibraryW( (LPWSTR)library )
+#define vs_close FreeLibrary
+#define vs_address GetProcAddress
+#define vs_sleep() Sleep(500)
+#define vs_strtok strtok_s
+#define vs_sscanf sscanf_s
+#define CloseEvent CloseHandle
+#else
+typedef char libp_t;
 #include <dlfcn.h>
 #include <unistd.h>
 #include <ctype.h>
-#define vs_sleep sleep
+#define avs_open(library) dlopen( library, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOW )
+#define avs_close dlclose
+#define avs_address dlsym
+#define vs_sleep() usleep(500)
 #define vs_strtok strtok_r
 #define vs_sscanf sscanf
-#ifdef __MACH__
-#define vs_open() dlopen( "libvapoursynth-script.dylib", RTLD_NOW )
-#else
-#define vs_open() dlopen( "libvapoursynth-script.so", RTLD_NOW )
-#endif
-#define vs_close dlclose
-#define vs_address dlsym
-#else
-#define vs_sleep Sleep
-#define vs_strtok strtok_s
-#define vs_sscanf sscanf_s
-#define vs_open() LoadLibraryW( L"vsscript" )
-#define vs_close FreeLibrary
-#define vs_address GetProcAddress
 #endif
 
 #define DECLARE_VS_FUNC(name) func_##name name
@@ -84,14 +91,25 @@ typedef struct VapourSynthContext {
     const VSAPI *vsapi;
     VSScript *script;
     VSNodeRef *node;
-    int curr_frame;
-    int ncpu;
+    atomic_int async_requested;
+    atomic_int async_completed;
+    atomic_int async_consumed;
     atomic_int async_pending;
+    HANDLE *async_frame_done_event;
+    int async_requests;
+    int async_start_frame;
+    const VSFrameRef **async_buffer;
+    int async_failed_frame;
     int num_frames;
     int bit_depth;
     uint64_t plane_size[3];
     int uc_depth;
-    struct 
+    int vfr;
+    uint64_t timebase_num;
+    uint64_t timebase_den;
+    int64_t current_timecode_num;
+    int64_t current_timecode_den;
+    struct
     {
         DECLARE_VS_FUNC( vsscript_init );
         DECLARE_VS_FUNC( vsscript_finalize );
@@ -104,9 +122,37 @@ typedef struct VapourSynthContext {
     } func;
 } VapourSynthContext;
 
-static int custom_vs_load_library( VapourSynthContext *h )
+static int custom_vs_load_library( VapourSynthContext *h, cli_input_opt_t *opt )
 {
-    h->library = vs_open();
+#ifdef _WIN32
+    libp_t *library_path= L"vsscript";
+    libp_t *tmp_buf;
+#else
+#if SYS_MACOSX
+    libp_t *library_path = "libvapoursynth-script.dylib";
+#else
+    libp_t *library_path = "libvapoursynth-script.so";
+#endif
+#endif
+    if( opt->frameserver_lib_path )
+    {
+#ifdef _WIN32
+        int size_needed = MultiByteToWideChar( CP_UTF8, 0, opt->frameserver_lib_path, -1, NULL, 0 );
+        tmp_buf = malloc( size_needed * sizeof(libp_t) );
+        MultiByteToWideChar( CP_UTF8, 0, opt->frameserver_lib_path, -1, (LPWSTR)tmp_buf, size_needed );
+        library_path = tmp_buf;
+#else
+        library_path = opt->frameserver_lib_path;
+#endif
+        x264_cli_log( "vpy", X264_LOG_INFO, "using external Vapoursynth library from: \"%s\" \n", opt->frameserver_lib_path );
+    }
+    h->library = vs_open( library_path );
+#ifdef _WIN32
+    if( opt->frameserver_lib_path )
+    {
+        free( tmp_buf );
+    }
+#endif
     if( !h->library )
         return -1;
     LOAD_VS_FUNC( vsscript_init, "_vsscript_init@0" );
@@ -128,16 +174,18 @@ static void VS_CC async_callback( void *user_data, const VSFrameRef *f, int n, V
 {
     VapourSynthContext *h = user_data;
 
-    if (!f) {
-        x264_cli_log( "vpy", X264_LOG_WARNING, "async frame request failed: %s\n", error_msg );
-    }
+    if ( !f ) {
+        h->async_failed_frame = n;
+        x264_cli_log( "vpy", X264_LOG_ERROR, "async frame request #%d failed: %s\n", n, error_msg );
+    } else
+        h->async_buffer[n] = f;
 
-    h->vsapi->freeFrame( f );
     atomic_fetch_sub( &h->async_pending, 1 );
+    SetEvent( h->async_frame_done_event[n] );
 }
 
-/* slightly modified rigaya's VersionString parser */
-int get_core_revision(const char *vsVersionString) 
+/* Slightly modified rigaya's VersionString parser. */
+int get_core_revision( const char *vsVersionString )
 {
     char *api_info = NULL;
     char buf[1024];
@@ -162,12 +210,12 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         return -1;
     int b_regular = x264_is_regular_file( fh );
     fclose( fh );
-    FAIL_IF_ERROR( !b_regular, "VPY input is incompatible with non-regular file `%s'\n", psz_filename );
+    FAIL_IF_ERROR( !b_regular, "vpy input is incompatible with non-regular file `%s'\n", psz_filename );
 
     VapourSynthContext *h = calloc( 1, sizeof(VapourSynthContext) );
     if( !h )
         return -1;
-    FAIL_IF_ERROR( custom_vs_load_library( h ), "failed to load VapourSynth\n" );
+    FAIL_IF_ERROR( custom_vs_load_library( h, opt ), "failed to load VapourSynth\n" );
     if( !h->func.vsscript_init() )
         FAIL_IF_ERROR( 1, "failed to initialize VapourSynth environment\n" );
     h->vsapi = h->func.vsscript_getVSApi2( VAPOURSYNTH_API_VERSION );
@@ -183,12 +231,73 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     x264_cli_log( "vpy", X264_LOG_INFO, "VapourSynth Core R%d\n", get_core_revision( core_info->versionString ) );
     info->width = vi->width;
     info->height = vi->height;
-    info->fps_num = vi->fpsNum;
-    info->fps_den = vi->fpsDen;
+    info->vfr = h->vfr = 0;
+
+    h->async_start_frame = 0;
+    h->async_completed = 0;
+    h->async_failed_frame = -1;
+    if( opt->seek > 0 )
+    {
+        h->async_start_frame = opt->seek;
+        h->async_completed = opt->seek;
+    }
+
+    char errbuf[256];
+    const VSFrameRef *frame0 = NULL;
+    frame0 = h->vsapi->getFrame( h->async_completed, h->node, errbuf, sizeof(errbuf) );
+    FAIL_IF_ERROR( !frame0, "%s occurred while getting frame %d\n", h->async_completed, errbuf );
+    const VSMap *props = h->vsapi->getFramePropsRO( frame0 );
+    int err_sar_num, err_sar_den;
+    int64_t sar_num = h->vsapi->propGetInt( props, "_SARNum", 0, &err_sar_num );
+    int64_t sar_den = h->vsapi->propGetInt( props, "_SARDen", 0, &err_sar_den );
+    info->sar_height = sar_den;
+    info->sar_width  = sar_num;
+    if( vi->fpsNum == 0 && vi->fpsDen == 0 ) {
+        /* There are no FPS data with native VFR videos, so let's grab it from first frame. */
+        int err_num, err_den;
+        int64_t fps_num = h->vsapi->propGetInt( props, "_DurationNum", 0, &err_num );
+        int64_t fps_den = h->vsapi->propGetInt( props, "_DurationDen", 0, &err_den );
+        FAIL_IF_ERROR( (err_num || err_den), "missing FPS values at frame 0" );
+        FAIL_IF_ERROR( !fps_den, "FPS denominator is zero at frame 0" );
+        info->fps_num = fps_den;
+        info->fps_den = fps_num;
+        /*
+           Idk how to retrieve optimal timebase here, as we probably need extra path to read all frame props...
+           Indeed that's redundant, so just hardcode the most common value. Hope that's enough.
+        */
+        info->timebase_num = h->timebase_num = 1;
+        info->timebase_den = h->timebase_den = 10000000;
+        h->current_timecode_num = 0;
+        h->current_timecode_den = 1;
+        info->vfr = h->vfr = 1;
+    } else {
+        info->fps_num = vi->fpsNum;
+        info->fps_den = vi->fpsDen;
+    }
+    h->vsapi->freeFrame( frame0 ); // What a waste, but whatever...
+
     h->num_frames = info->num_frames = vi->numFrames;
     h->bit_depth = vi->format->bitsPerSample;
     info->thread_safe = 1;
-    h->ncpu = core_info->numThreads;
+
+    h->async_requests = core_info->numThreads;
+    h->async_buffer = (const VSFrameRef **)malloc(h->num_frames * sizeof(const VSFrameRef *));
+    h->async_frame_done_event = (HANDLE*)malloc(h->num_frames * sizeof(h->async_frame_done_event));
+
+    /* Set all frame event handles into "waiting" state. */
+    for (int i = h->async_start_frame; i < h->num_frames; i++) {
+        if ( NULL == (h->async_frame_done_event[i] = CreateEvent(NULL, FALSE, FALSE, NULL)) )
+            FAIL_IF_ERROR( 1, "failed to create async event for frame %d\n", i );
+    }
+
+    const int intital_request_size = min(h->async_requests, h->num_frames - h->async_start_frame);
+    h->async_requested = h->async_start_frame + intital_request_size;
+    for ( int n = h->async_start_frame; n < h->async_start_frame + intital_request_size; n++ )
+    {
+        h->vsapi->getFrameAsync( n, h->node, async_callback, h );
+        atomic_fetch_add( &h->async_pending, 1 );
+    }
+
     h->uc_depth = (h->bit_depth & 7) && (vi->format->colorFamily == cmYUV || vi->format->colorFamily == cmYCoCg);
 
     if( vi->format->id == pfRGB48 )
@@ -210,10 +319,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     else
         FAIL_IF_ERROR( 1, "not supported pixel type: %s\n", vi->format->name );
 
-    /* since VapourSynth supports vfr internally, it would be great to implement handling for it someday */
-    info->vfr = 0;
-
-    /* bitdepth upconversion stuff */
+    /* High bitdepth upconversion stuff. */
     if( h->uc_depth ) {
         const x264_cli_csp_t *cli_csp = x264_cli_get_csp( info->csp );
         for( int i = 0; i < cli_csp->planes; i++ ) {
@@ -241,32 +347,37 @@ static int picture_alloc( cli_pic_t *pic, hnd_t handle, int csp, int width, int 
 static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
 {
     static const int planes[3] = { 0, 1, 2 };
-    char errbuf[256];
-    const VSFrameRef *frm = NULL;
     VapourSynthContext *h = handle;
 
     if( i_frame >= h->num_frames )
         return -1;
 
-    /* explicitly cast away the const attribute to avoid a warning */
-    frm = pic->opaque = (VSFrameRef*)h->vsapi->getFrame( i_frame, h->node, errbuf, sizeof(errbuf) );
-    FAIL_IF_ERROR( !frm, "%s occurred while reading frame %d\n", errbuf, i_frame );
+    if( h->async_failed_frame >= i_frame )
+        return -1;
 
-    /* Prefetch the subsequent frames. */
-    for ( int i = 0; i < h->ncpu; ++i ) {
-        if ( i >= h->num_frames - i_frame )
-            break;
-        h->vsapi->getFrameAsync( i_frame + i, h->node, async_callback, h );
-        atomic_fetch_add( &h->async_pending, 1 );
+    WaitForSingleObject( h->async_frame_done_event[i_frame], INFINITE );
+    if( !h->async_buffer[i_frame] )
+        return -1;
+    pic->opaque = (VSFrameRef*)h->async_buffer[i_frame];
+
+    /* Prefetch subsequent frames. */
+    if (h->async_requested < h->num_frames)
+    {
+        while( h->async_requests >= (h->async_requested - h->async_consumed) && h->async_failed_frame < 0 )
+        {
+            h->vsapi->getFrameAsync( h->async_requested, h->node, async_callback, h );
+            h->async_requested++;
+            atomic_fetch_add( &h->async_pending, 1 );
+        }
     }
 
     for( int i = 0; i < pic->img.planes; i++ ) {
-        /* explicitly cast away the const attribute to avoid a warning */
-        pic->img.plane[i] = (uint8_t*)h->vsapi->getReadPtr( frm, planes[i] );
-        pic->img.stride[i] = h->vsapi->getStride( frm, planes[i] );
+        /* Explicitly cast away the const attribute to avoid warning. */
+        pic->img.plane[i] = (uint8_t*)h->vsapi->getReadPtr( pic->opaque, planes[i] );
+        pic->img.stride[i] = h->vsapi->getStride( pic->opaque, planes[i] );
         if( h->uc_depth ) {
-            /* upconvert non 16bit high depth planes to 16bit using the same
-             * algorithm as used in the depth filter. */
+            /* Upconvert non 16-bit high depth planes to 16-bit
+             * using the same algorithm as in the depth filter. */
             uint16_t *plane = (uint16_t*)pic->img.plane[i];
             uint64_t pixel_count = h->plane_size[i];
             int lshift = 16 - h->bit_depth;
@@ -274,13 +385,32 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
                 plane[j] = plane[j] << lshift;
         }
     }
+    if ( h->vfr ) {
+        /* Adapted from vspipe timecodes generator and lavf.c vfr part. */
+        pic->pts = ( h->current_timecode_num * h->timebase_den / h->current_timecode_den ); // hope it will fit
+        pic->duration = 0;
+        const VSMap *props = h->vsapi->getFramePropsRO( pic->opaque );
+        int err_num, err_den;
+        int64_t duration_num = h->vsapi->propGetInt( props, "_DurationNum", 0, &err_num );
+        int64_t duration_den = h->vsapi->propGetInt( props, "_DurationDen", 0, &err_den );
+        FAIL_IF_ERROR( (err_num || err_den), "missing duration at frame %d", i_frame );
+        FAIL_IF_ERROR( !duration_den, "duration denominator is zero at frame %d", i_frame );
+        vs_addRational( &h->current_timecode_num, &h->current_timecode_den, duration_num, duration_den );
+    }
+
+    h->vsapi->freeFrame( pic->opaque );
+    h->async_buffer[i_frame] = NULL;
+    h->async_consumed++;
+
     return 0;
 }
 
 static int release_frame( cli_pic_t *pic, hnd_t handle )
 {
-    VapourSynthContext *h = handle;
-    h->vsapi->freeFrame( pic->opaque );
+    /* Not reliable (frames doesn't freed on Ctrl+C event or
+       script fail), so we're releasing them at read_frame. */
+    (void)pic;
+    (void)handle;
     return 0;
 }
 
@@ -294,9 +424,32 @@ static int close_file( hnd_t handle )
     VapourSynthContext *h = handle;
 
     /* Wait for any async requests to complete. */
-    while ( atomic_load( &h->async_pending ) ) {
-        vs_sleep( 1 );
+    atomic_int out;
+    while ( out = atomic_load( &h->async_pending ) ) {
+        x264_cli_log( "vpy", X264_LOG_DEBUG, "waiting for %d async frame requests to complete...      \r", out);
+        vs_sleep();
     }
+
+    /* Release not consumed frames. Needed in case of early interruption
+       or when --frames option is less than actual script's frame count. */
+    for ( int i = h->async_consumed; i < h->async_requested; i++ )
+    {
+        if ( h->async_buffer[i] != NULL )
+            h->vsapi->freeFrame( h->async_buffer[i] );
+    }
+
+    if( h->async_buffer )
+        free( h->async_buffer );
+
+    /* Event handles should be closed. */
+    for ( int i = h->async_start_frame; i < h->num_frames; i++ )
+    {
+        if ( h->async_frame_done_event[i] )
+            CloseEvent( h->async_frame_done_event[i] );
+    }
+
+    if( h->async_frame_done_event )
+        free( h->async_frame_done_event );
 
     h->vsapi->freeNode( h->node );
     h->func.vsscript_freeScript( h->script );
@@ -306,6 +459,7 @@ static int close_file( hnd_t handle )
         vs_close( h->library );
 
     free( h );
+
     return 0;
 }
 
