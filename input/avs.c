@@ -156,7 +156,7 @@ static int custom_avs_load_library( avs_hnd_t *h, cli_input_opt_t* opt )
 #else
         library_path = opt->frameserver_lib_path;
 #endif
-        x264_cli_log("avs", X264_LOG_INFO, "using external Avisynth library from %s\n", opt->frameserver_lib_path);
+        x264_cli_log("avs", X264_LOG_INFO, "using external Avisynth library from: \"%s\" \n", opt->frameserver_lib_path);
         }
         h->library = avs_open(library_path);
 #ifdef _WIN32

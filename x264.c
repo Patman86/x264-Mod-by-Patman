@@ -1691,8 +1691,9 @@ generic_option:
 
     x264_reduce_fraction( &info.sar_width, &info.sar_height );
     x264_reduce_fraction( &info.fps_num, &info.fps_den );
-    x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d @ %u/%u fps (%cfr)\n", info.width,
-                  info.height, info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
+    x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d %u:%u @ %u/%u fps (%cfr)\n", info.width,
+                  info.height, info.sar_width, info.sar_height,
+                  info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
     x264_cli_log(demuxername, X264_LOG_INFO, "color matrix: %s\n",
     strtable_lookup(x264_colmatrix_names, shown_colormatrix));
 
