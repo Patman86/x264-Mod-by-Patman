@@ -48,7 +48,7 @@ typedef char libp_t;
 #endif
 #define AVSC_DECLARE_FUNC(name) name##_func name
 
-#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "avs", __VA_ARGS__ )
+#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "avs ", __VA_ARGS__ )
 
 /* AVS uses a versioned interface to control backwards compatibility */
 /* YV12 support is required, which was added in 2.5 */
@@ -156,7 +156,7 @@ static int custom_avs_load_library( avs_hnd_t *h, cli_input_opt_t* opt )
 #else
         library_path = opt->frameserver_lib_path;
 #endif
-        x264_cli_log("avs", X264_LOG_INFO, "using external Avisynth library from: \"%s\" \n", opt->frameserver_lib_path);
+        x264_cli_log("avs ", X264_LOG_INFO, "using external Avisynth library from: \"%s\" \n", opt->frameserver_lib_path);
         }
         h->library = avs_open(library_path);
 #ifdef _WIN32
@@ -358,7 +358,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     float avs_version = get_avs_version( h );
     if( avs_version <= 0 )
         return -1;
-    x264_cli_log( "avs", X264_LOG_DEBUG, "using avisynth version %.2f\n", avs_version );
+    x264_cli_log( "avs ", X264_LOG_DEBUG, "using avisynth version %.2f\n", avs_version );
 
     if (AVS_IS_AVISYNTHPLUS)
         {
@@ -368,7 +368,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
             FAIL_IF_ERROR(!avs_is_string(ver), "VersionString did not return a string value\n");
             const char* avsplus_version = avs_as_string(ver);
             h->func.avs_release_value(ver);
-            x264_cli_log("avs", X264_LOG_INFO, "%s\n", avsplus_version);
+            x264_cli_log("avs ", X264_LOG_INFO, "%s\n", avsplus_version);
         }
 
 #ifdef _WIN32
@@ -409,7 +409,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
          {
              res = h->func.avs_invoke( h->env, "AutoloadPlugins", avs_new_value_array(NULL, 0), NULL );
              if ( avs_is_error(res) )
-                 x264_cli_log( "avs", X264_LOG_INFO, "AutoloadPlugins failed: %s\n", avs_as_string(res) );
+                 x264_cli_log( "avs ", X264_LOG_INFO, "AutoloadPlugins failed: %s\n", avs_as_string(res) );
          }
         /* cycle through known source filters to find one that works */
         const char *filter[AVS_MAX_SEQUENCE+1] = { 0 };
@@ -417,7 +417,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         int i;
         for( i = 0; filter[i]; i++ )
         {
-            x264_cli_log( "avs", X264_LOG_INFO, "trying %s... ", filter[i] );
+            x264_cli_log( "avs ", X264_LOG_INFO, "trying %s... ", filter[i] );
             if( !h->func.avs_function_exists( h->env, filter[i] ) )
             {
                 x264_cli_printf( X264_LOG_INFO, "not found\n" );
@@ -448,7 +448,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     /* if the clip is made of fields instead of frames, call weave to make them frames */
     if( avs_is_field_based( vi ) )
     {
-        x264_cli_log( "avs", X264_LOG_WARNING, "detected fieldbased (separated) input, weaving to frames\n" );
+        x264_cli_log( "avs ", X264_LOG_WARNING, "detected fieldbased (separated) input, weaving to frames\n" );
         AVS_Value tmp = h->func.avs_invoke( h->env, "Weave", res, NULL );
         FAIL_IF_ERROR( avs_is_error( tmp ), "couldn't weave fields into frames: %s\n", avs_as_error( tmp ) );
         res = update_clip( h, &vi, tmp, res );
@@ -482,7 +482,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
                   opt->output_csp == X264_CSP_I444 ? "YV24" :
                   "RGB";
         }
-        x264_cli_log( "avs", X264_LOG_WARNING, "converting input clip to %s\n", csp );
+        x264_cli_log( "avs ", X264_LOG_WARNING, "converting input clip to %s\n", csp );
         if( opt->output_csp != X264_CSP_I400 )
         {
             FAIL_IF_ERROR( opt->output_csp < X264_CSP_I444 && (vi->width&1),
@@ -527,7 +527,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     if( avs_is_yuv( vi ) && opt->output_range != RANGE_AUTO && ((opt->input_range == RANGE_PC) != opt->output_range) )
     {
         const char *levels = opt->output_range ? "TV->PC" : "PC->TV";
-        x264_cli_log( "avs", X264_LOG_WARNING, "performing %s conversion\n", levels );
+        x264_cli_log( "avs ", X264_LOG_WARNING, "performing %s conversion\n", levels );
         AVS_Value arg_arr[2];
         arg_arr[0] = res;
         arg_arr[1] = avs_new_value_string( levels );
@@ -593,7 +593,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     if (opt->bit_depth > 8)
     {
         FAIL_IF_ERROR(info->width & 3, "avisynth 16bit hack requires that width is at least mod4\n");
-        x264_cli_log("avs", X264_LOG_INFO, "avisynth 16bit hack enabled\n");
+        x264_cli_log("avs ", X264_LOG_INFO, "avisynth 16bit hack enabled\n");
         info->csp |= X264_CSP_HIGH_DEPTH;
         info->width >>= 1;
     }

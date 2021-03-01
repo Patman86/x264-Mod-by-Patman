@@ -75,7 +75,7 @@ typedef char libp_t;
         goto fail;\
 }
 
-#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "vpy", __VA_ARGS__ )
+#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "vpy ", __VA_ARGS__ )
 
 typedef int (VS_CC *func_vsscript_init)(void);
 typedef int (VS_CC *func_vsscript_finalize)(void);
@@ -144,7 +144,7 @@ static int custom_vs_load_library( VapourSynthContext *h, cli_input_opt_t *opt )
 #else
         library_path = opt->frameserver_lib_path;
 #endif
-        x264_cli_log( "vpy", X264_LOG_INFO, "using external Vapoursynth library from: \"%s\" \n", opt->frameserver_lib_path );
+        x264_cli_log( "vpy ", X264_LOG_INFO, "using external Vapoursynth library from: \"%s\" \n", opt->frameserver_lib_path );
     }
     h->library = vs_open( library_path );
 #ifdef _WIN32
@@ -176,7 +176,7 @@ static void VS_CC async_callback( void *user_data, const VSFrameRef *f, int n, V
 
     if ( !f ) {
         h->async_failed_frame = n;
-        x264_cli_log( "vpy", X264_LOG_ERROR, "async frame request #%d failed: %s\n", n, error_msg );
+        x264_cli_log( "vpy ", X264_LOG_ERROR, "async frame request #%d failed: %s\n", n, error_msg );
     } else
         h->async_buffer[n] = f;
 
@@ -228,7 +228,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     const VSCoreInfo *core_info = h->vsapi->getCoreInfo( h->func.vsscript_getCore( h->script ) );
     const VSVideoInfo *vi = h->vsapi->getVideoInfo( h->node );
     FAIL_IF_ERROR( !isConstantFormat(vi), "only constant video formats are supported\n" );
-    x264_cli_log( "vpy", X264_LOG_INFO, "VapourSynth Core R%d\n", get_core_revision( core_info->versionString ) );
+    x264_cli_log( "vpy ", X264_LOG_INFO, "VapourSynth Core R%d\n", get_core_revision( core_info->versionString ) );
     info->width = vi->width;
     info->height = vi->height;
     info->vfr = h->vfr = 0;
@@ -426,7 +426,7 @@ static int close_file( hnd_t handle )
     /* Wait for any async requests to complete. */
     atomic_int out;
     while ( out = atomic_load( &h->async_pending ) ) {
-        x264_cli_log( "vpy", X264_LOG_DEBUG, "waiting for %d async frame requests to complete...      \r", out);
+        x264_cli_log( "vpy ", X264_LOG_DEBUG, "waiting for %d async frame requests to complete...      \r", out);
         vs_sleep();
     }
 

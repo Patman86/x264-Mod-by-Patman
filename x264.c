@@ -39,6 +39,7 @@
 
 #include <signal.h>
 #include <getopt.h>
+#include <string.h>
 #include "x264cli.h"
 #include "input/input.h"
 #include "output/output.h"
@@ -1660,6 +1661,22 @@ generic_option:
     input_filename = argv[optind++];
     video_info_t info = {0};
     char demuxername[5];
+	int padLen = 4;
+
+	char *StringPadRight(char *string, int padded_len, char *pad)
+	{
+    int len = (int) strlen(string);
+    if (len >= padded_len)
+	{
+        return string;
+    }
+    int i;
+    for (i = 0; i < padded_len - len; i++)
+	{
+        strcat(string, pad);
+    }
+    return string;
+    }
 
     /* set info flags to be overwritten by demuxer as necessary. */
     info.colormatrix = param->vui.i_colmatrix;
@@ -1691,11 +1708,10 @@ generic_option:
 
     x264_reduce_fraction( &info.sar_width, &info.sar_height );
     x264_reduce_fraction( &info.fps_num, &info.fps_den );
-    x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d %u:%u @ %u/%u fps (%cfr)\n", info.width,
+    x264_cli_log( StringPadRight(demuxername, padLen, " "), X264_LOG_INFO, "%dx%d %u:%u @ %u/%u fps (%cfr)\n", info.width,
                   info.height, info.sar_width, info.sar_height,
                   info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
-    x264_cli_log(demuxername, X264_LOG_INFO, "color matrix: %s\n",
-    strtable_lookup(x264_colmatrix_names, shown_colormatrix));
+    x264_cli_log( StringPadRight(demuxername, padLen, " "), X264_LOG_INFO, "color matrix: %s\n", strtable_lookup(x264_colmatrix_names, shown_colormatrix) );
 
     /* We don't realy need this hack, as
      *   for AviSynth  input: it is not necessary as colorspace magic is changed in the next patch: decided according to resolution

@@ -1649,7 +1649,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     }
     if( !h->param.cpu )
         p += sprintf( p, " none!" );
-    x264_log(h, X264_LOG_INFO, "AVC Encoder x264 core %d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION);
+    x264_log( h, X264_LOG_INFO, "AVC Encoder x264 core %d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION );
     x264_log( h, X264_LOG_INFO, "%s\n", buf );
 
     if( x264_analyse_init_costs( h ) )
