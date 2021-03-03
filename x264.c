@@ -1661,7 +1661,7 @@ generic_option:
     input_filename = argv[optind++];
     video_info_t info = {0};
     char demuxername[5];
-	int padLen = 4;
+    int padLen = 4;
 
 	char *StringPadRight(char *string, int padded_len, char *pad)
 	{
@@ -1954,9 +1954,9 @@ static int64_t print_status( int64_t i_start, int64_t i_previous, int i_frame, i
     char* file_unit, * estsz_unit;
     fps_prec = fps > 999.5 ? 0 : fps > 99.5 ? 1 : fps > 9.95 ? 2 : 3;
     bitrate_prec = bitrate > 9999.5 ? 0 : bitrate > 999.5 ? 1 : 2;
-    file_prec = i_file < 1048576000 ? 2 : i_file < 10485760000 ? 1 : 0;
-    file_num = i_file < 1048576 ? (double)i_file / 1024. : (double)i_file / 1048576.;
-    file_unit = i_file < 1048576 ? "K" : "M";
+    file_prec = i_file < 1000000000 ? 2 : i_file < 10000000000 ? 1 : 0;
+    file_num = i_file < 1000000 ? (double)i_file / 1000. : (double)i_file / 1000000.;
+    file_unit = i_file < 1000000 ? "K" : "M";
     if( i_frame_total )
     {
         ete = i_elapsed / 1000000;
@@ -1968,10 +1968,10 @@ static int64_t print_status( int64_t i_start, int64_t i_previous, int i_frame, i
         eta_hh = eta / 3600;
         eta_mm = (eta / 60) % 60;
         eta_ss = eta % 60;
-        estsz = (double)i_file * i_frame_total / (i_frame * 1024.);
-        estsz_prec = estsz < 1024000 ? 2 : estsz < 10240000 ? 1 : 0;
-        estsz_num = estsz < 1024 ? estsz : estsz / 1024;
-        estsz_unit = estsz < 1024 ? "K" : "M";
+        estsz = (double)i_file * i_frame_total / (i_frame * 1000.);
+        estsz_prec = estsz < 1000000 ? 2 : estsz < 10000000 ? 1 : 0;
+        estsz_num = estsz < 1000 ? estsz : estsz / 1000;
+        estsz_unit = estsz < 1000 ? "K" : "M";
         sprintf(buf, "x264 [%.1f%%] %d/%d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
                 percentage, i_frame, i_frame_total, fps_prec, fps, bitrate_prec, bitrate,
                 ete_hh, ete_mm, ete_ss,
