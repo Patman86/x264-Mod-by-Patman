@@ -69,19 +69,19 @@ void x264_log_default( void *p_unused, int i_level, const char *psz_fmt, va_list
     switch( i_level )
     {
         case X264_LOG_ERROR:
-            psz_prefix = "error";
+            psz_prefix = "FLAW";
             break;
         case X264_LOG_WARNING:
-            psz_prefix = "warning";
+            psz_prefix = "WARN";
             break;
         case X264_LOG_INFO:
-            psz_prefix = "info";
+            psz_prefix = "INFO";
             break;
         case X264_LOG_DEBUG:
-            psz_prefix = "debug";
+            psz_prefix = "DEBU";
             break;
         default:
-            psz_prefix = "unknown";
+            psz_prefix = "ANON";
             break;
     }
     fprintf( stderr, "x264 [%s]: ", psz_prefix );
