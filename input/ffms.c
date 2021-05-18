@@ -154,12 +154,10 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
 
     /* ffms timestamps are in milliseconds. ffms also uses int64_ts for timebase,
      * so we need to reduce large timebases to prevent overflow */
-    h->track = FFMS_GetTrackFromVideo(h->video_source);
-    const FFMS_TrackTimeBase * timebase = FFMS_GetTimeBase(h->track);
+    h->track = FFMS_GetTrackFromVideo( h->video_source );
+    const FFMS_TrackTimeBase * timebase = FFMS_GetTimeBase( h->track );
     if( h->vfr_input )
     {
-        h->track = FFMS_GetTrackFromVideo( h->video_source );
-        const FFMS_TrackTimeBase *timebase = FFMS_GetTimeBase( h->track );
         int64_t timebase_num = timebase->Num;
         int64_t timebase_den = timebase->Den * 1000;
         h->reduce_pts = 0;
