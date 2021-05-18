@@ -574,7 +574,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         info->csp = X264_CSP_I420 | X264_CSP_HIGH_DEPTH;
     else if( avs_is_yv12( vi ) )
         info->csp = X264_CSP_I420;
-    else if( AVS_IS_Y_HBD( vi ) ))
+    else if( AVS_IS_Y_HBD( vi ) )
         info->csp = X264_CSP_I400 | X264_CSP_HIGH_DEPTH;
     else if( avs_is_y8( vi ) )
         info->csp = X264_CSP_I400;
