@@ -39,6 +39,7 @@
 
 #include <signal.h>
 #include <getopt.h>
+#include <string.h>
 #include "x264cli.h"
 #include "input/input.h"
 #include "output/output.h"
@@ -189,6 +190,9 @@ const char * const x264_demuxer_names[] =
 #if HAVE_AVS
     "avs",
 #endif
+#if HAVE_VPY
+    "vpy",
+#endif
 #if HAVE_LAVF
     "lavf",
 #endif
@@ -271,19 +275,19 @@ void x264_cli_log( const char *name, int i_level, const char *fmt, ... )
     switch( i_level )
     {
         case X264_LOG_ERROR:
-            s_level = "error";
+            s_level = "FLAW";
             break;
         case X264_LOG_WARNING:
-            s_level = "warning";
+            s_level = "WARN";
             break;
         case X264_LOG_INFO:
-            s_level = "info";
+            s_level = "INFO";
             break;
         case X264_LOG_DEBUG:
-            s_level = "debug";
+            s_level = "DEBU";
             break;
         default:
-            s_level = "unknown";
+            s_level = "ANON";
             break;
     }
     fprintf( stderr, "%s [%s]: ", name, s_level );
@@ -306,9 +310,9 @@ void x264_cli_printf( int i_level, const char *fmt, ... )
 static void print_version_info( void )
 {
 #ifdef X264_POINTVER
-    printf( "x264 "X264_POINTVER"\n" );
+    printf( "x264 "X264_POINTVER" [Mod by Patman]\n" );
 #else
-    printf( "x264 0.%d.X\n", X264_BUILD );
+    printf( "x264 0.%d.X [Mod by Patman]\n", X264_BUILD );
 #endif
 #if HAVE_SWSCALE
     printf( "(libswscale %d.%d.%d)\n", LIBSWSCALE_VERSION_MAJOR, LIBSWSCALE_VERSION_MINOR, LIBSWSCALE_VERSION_MICRO );
@@ -483,12 +487,13 @@ static void help( x264_param_t *defaults, int longhelp )
 #define H0 printf
 #define H1 if( longhelp >= 1 ) printf
 #define H2 if( longhelp == 2 ) printf
-    H0( "x264 core:%d%s\n"
+    H0( "x264 core:%d%s [Mod by Patman]\n"
         "Syntax: x264 [options] -o outfile infile\n"
         "\n"
         "Infile can be raw (in which case resolution is required),\n"
         "  or YUV4MPEG (*.y4m),\n"
-        "  or Avisynth if compiled with support (%s).\n"
+        "  or Avisynth (*.avs) if compiled with support (%s).\n"
+        "  or Vapoursynth (*.vpy) if compiles with support (%s).\n"
         "  or libav* formats if compiled with lavf support (%s) or ffms support (%s).\n"
         "Outfile type is selected by filename:\n"
         " .264 -> Raw bytestream\n"
@@ -505,6 +510,11 @@ static void help( x264_param_t *defaults, int longhelp )
         "\n",
         X264_BUILD, X264_VERSION,
 #if HAVE_AVS
+        "yes",
+#else
+        "no",
+#endif
+#if HAVE_VPY
         "yes",
 #else
         "no",
@@ -898,6 +908,7 @@ static void help( x264_param_t *defaults, int longhelp )
         "                                  - %s\n", x264_muxer_names[0], stringify_names( buf, x264_muxer_names ) );
     H1( "      --demuxer <string>      Specify input container format [\"%s\"]\n"
         "                                  - %s\n", x264_demuxer_names[0], stringify_names( buf, x264_demuxer_names ) );
+    H1( "      --synth-lib <string>    Load external avisynth / vapoursynth library from given full path\n" );
     H1( "      --input-fmt <string>    Specify input file format (requires lavf support)\n" );
     H1( "      --input-csp <string>    Specify input colorspace format for raw input\n" );
     print_csp_names( longhelp );
@@ -1005,7 +1016,9 @@ typedef enum
     OPT_DTS_COMPRESSION,
     OPT_OUTPUT_CSP,
     OPT_INPUT_RANGE,
-    OPT_RANGE
+    OPT_RANGE,
+    OPT_FRAMESERVER_LIB,
+    OPT_COLORMATRIX
 } OptionsOPT;
 
 static char short_options[] = "8A:B:b:f:hI:i:m:o:p:q:r:t:Vvw";
@@ -1152,7 +1165,7 @@ static struct option long_options[] =
     { "range",                required_argument, NULL, OPT_RANGE },
     { "colorprim",            required_argument, NULL, 0 },
     { "transfer",             required_argument, NULL, 0 },
-    { "colormatrix",          required_argument, NULL, 0 },
+    { "colormatrix",          required_argument, NULL, OPT_COLORMATRIX },
     { "chromaloc",            required_argument, NULL, 0 },
     { "force-cfr",            no_argument,       NULL, 0 },
     { "tcfile-in",            required_argument, NULL, OPT_TCFILE_IN },
@@ -1177,6 +1190,7 @@ static struct option long_options[] =
     { "dts-compress",         no_argument,       NULL, OPT_DTS_COMPRESSION },
     { "output-csp",           required_argument, NULL, OPT_OUTPUT_CSP },
     { "input-range",          required_argument, NULL, OPT_INPUT_RANGE },
+    { "synth-lib",            required_argument, NULL, OPT_FRAMESERVER_LIB },
     { "stitchable",           no_argument,       NULL, 0 },
     { "filler",               no_argument,       NULL, 0 },
     { NULL,                   0,                 NULL, 0 }
@@ -1251,6 +1265,16 @@ static int select_input( const char *demuxer, char *used_demuxer, char *filename
         return -1;
 #endif
     }
+    else if (!strcasecmp(module, "vpy"))
+    {
+#if HAVE_VPY
+        cli_input = vpy_input;
+        module = "vpy";
+#else
+        x264_cli_log("x264", X264_LOG_ERROR, "not compiled with VPY input support\n");
+        return -1;
+#endif
+    }
     else if( !strcasecmp( module, "y4m" ) )
         cli_input = y4m_input;
     else if( !strcasecmp( module, "raw" ) || !strcasecmp( ext, "yuv" ) )
@@ -1282,6 +1306,15 @@ static int select_input( const char *demuxer, char *used_demuxer, char *filename
             module = "avs";
             b_auto = 0;
             cli_input = avs_input;
+        }
+#endif
+#if HAVE_VPY
+        if (b_regular && (b_auto || !strcasecmp(demuxer, "vpy")) &&
+            !vpy_input.open_file(filename, p_handle, info, opt))
+        {
+            module = "vpy";
+            b_auto = 0;
+            cli_input = vpy_input;
         }
 #endif
         if( b_auto && !raw_input.open_file( filename, p_handle, info, opt ) )
@@ -1398,6 +1431,8 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
     int b_user_ref = 0;
     int b_user_fps = 0;
     int b_user_interlaced = 0;
+    int b_user_colormatrix = 0;
+    int shown_colormatrix = 2; /* shown as 'undef' */
     cli_input_opt_t input_opt;
     cli_output_opt_t output_opt;
     char *preset = NULL;
@@ -1578,6 +1613,12 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
                 FAIL_IF_ERROR( parse_enum_value( optarg, x264_range_names, &param->vui.b_fullrange ), "Unknown range `%s'\n", optarg );
                 input_opt.output_range = param->vui.b_fullrange += RANGE_AUTO;
                 break;
+            case OPT_FRAMESERVER_LIB:
+                input_opt.frameserver_lib_path = optarg;
+                break;
+            case OPT_COLORMATRIX:
+                b_user_colormatrix = 1;
+                goto generic_option;
             default:
 generic_option:
             {
@@ -1627,8 +1668,25 @@ generic_option:
     input_filename = argv[optind++];
     video_info_t info = {0};
     char demuxername[5];
+    int padLen = 4;
+
+	char *StringPadRight(char *string, int padded_len, char *pad)
+	{
+    int len = (int) strlen(string);
+    if (len >= padded_len)
+	{
+        return string;
+    }
+    int i;
+    for (i = 0; i < padded_len - len; i++)
+	{
+        strcat(string, pad);
+    }
+    return string;
+    }
 
     /* set info flags to be overwritten by demuxer as necessary. */
+    info.colormatrix = param->vui.i_colmatrix;
     info.csp        = param->i_csp;
     info.fps_num    = param->i_fps_num;
     info.fps_den    = param->i_fps_den;
@@ -1652,11 +1710,37 @@ generic_option:
     FAIL_IF_ERROR( !opt->hin && cli_input.open_file( input_filename, &opt->hin, &info, &input_opt ),
                    "could not open input file `%s'\n", input_filename );
 
+    if (info.colormatrix >= 0 && info.colormatrix <= 8)
+        shown_colormatrix = info.colormatrix;
+
     x264_reduce_fraction( &info.sar_width, &info.sar_height );
     x264_reduce_fraction( &info.fps_num, &info.fps_den );
-    x264_cli_log( demuxername, X264_LOG_INFO, "%dx%d%c %u:%u @ %u/%u fps (%cfr)\n", info.width,
-                  info.height, info.interlaced ? 'i' : 'p', info.sar_width, info.sar_height,
+    x264_cli_log( StringPadRight(demuxername, padLen, " "), X264_LOG_INFO, "%dx%d %u:%u @ %u/%u fps (%cfr)\n", info.width,
+                  info.height, info.sar_width, info.sar_height,
                   info.fps_num, info.fps_den, info.vfr ? 'v' : 'c' );
+    x264_cli_log( StringPadRight(demuxername, padLen, " "), X264_LOG_INFO, "color matrix: %s\n", strtable_lookup(x264_colmatrix_names, shown_colormatrix) );
+
+    /* We don't realy need this hack, as
+     *   for AviSynth  input: it is not necessary as colorspace magic is changed in the next patch: decided according to resolution
+     *   for lavf/ffms input: does not really work well now ( if it did ) for many sources, with which lavf/ffms may report colorspace in a different logic,
+     *                        no to mention swscale is too terrible to be relied on
+     *   for output-csp=rgb : sps->vui.i_colmatrix will be set correctly in x264_sps_init, so no need to set it here
+     * And the most important is, for the majority who are not aware of this hidden logic, it is always necessary to specify the output-csp to avoid regressions
+     */
+#if 0
+    /* In case of YUV<->RGB, and no user-set settings,
+       change the metadata gotten from demuxers. */
+    if ((info.csp & X264_CSP_MASK) >= X264_CSP_BGR && (output_csp & X264_CSP_MASK) <= X264_CSP_YV24)
+    {
+        if (!b_user_colormatrix)
+            info.colormatrix = 5; /* bt470bg ; swscale and avisynth by default do their magic in it. */
+    }
+    else if ((info.csp & X264_CSP_MASK) <= X264_CSP_YV24 && (output_csp & X264_CSP_MASK) >= X264_CSP_BGR)
+    {
+        if (!b_user_colormatrix)
+            info.colormatrix = 0; /* GBR */
+    }
+#endif // if 0
 
     FAIL_IF_ERROR( info.width <= 0 || info.height <= 0 ||
                    info.width > MAX_RESOLUTION || info.height > MAX_RESOLUTION,
@@ -1735,6 +1819,9 @@ generic_option:
     if( input_opt.input_range != RANGE_AUTO )
         info.fullrange = input_opt.input_range;
 
+    if (b_user_colormatrix)
+        info.colormatrix = param->vui.i_colmatrix;
+
     if( init_vid_filters( vid_filters, &opt->hin, &info, param, output_csp ) )
         return -1;
 
@@ -1744,6 +1831,7 @@ generic_option:
     param->i_fps_den = info.fps_den;
     param->i_timebase_num = info.timebase_num;
     param->i_timebase_den = info.timebase_den;
+    param->vui.i_colmatrix = info.colormatrix;
     param->vui.i_sar_width  = info.sar_width;
     param->vui.i_sar_height = info.sar_height;
 
@@ -1868,15 +1956,41 @@ static int64_t print_status( int64_t i_start, int64_t i_previous, int i_frame, i
         bitrate = (double) i_file * 8 / ( (double) last_ts * 1000 * param->i_timebase_num / param->i_timebase_den );
     else
         bitrate = (double) i_file * 8 / ( (double) 1000 * param->i_fps_den / param->i_fps_num );
+    int ete, ete_hh, ete_mm, ete_ss, eta, eta_hh, eta_mm, eta_ss, fps_prec, bitrate_prec, file_prec, estsz_prec;
+    double percentage, estsz, file_num, estsz_num;
+    char* file_unit, * estsz_unit;
+    fps_prec = fps > 999.5 ? 0 : fps > 99.5 ? 1 : fps > 9.95 ? 2 : 3;
+    bitrate_prec = bitrate > 9999.5 ? 0 : bitrate > 999.5 ? 1 : 2;
+    file_prec = i_file < 1000000000 ? 2 : i_file < 10000000000 ? 1 : 0;
+    file_num = i_file < 1000000 ? (double)i_file / 1000. : (double)i_file / 1000000.;
+    file_unit = i_file < 1000000 ? "K" : "M";
     if( i_frame_total )
     {
-        int eta = i_elapsed * (i_frame_total - i_frame) / ((int64_t)i_frame * 1000000);
-        sprintf( buf, "x264 [%.1f%%] %d/%d frames, %.2f fps, %.2f kb/s, eta %d:%02d:%02d",
-                 100. * i_frame / i_frame_total, i_frame, i_frame_total, fps, bitrate,
-                 eta/3600, (eta/60)%60, eta%60 );
+        ete = i_elapsed / 1000000;
+        eta = i_elapsed * (i_frame_total - i_frame) / ((int64_t)i_frame * 1000000);
+        percentage = 100. * i_frame / i_frame_total;
+        ete_hh = ete / 3600;
+        ete_mm = (ete / 60) % 60;
+        ete_ss = ete % 60;
+        eta_hh = eta / 3600;
+        eta_mm = (eta / 60) % 60;
+        eta_ss = eta % 60;
+        estsz = (double)i_file * i_frame_total / (i_frame * 1000.);
+        estsz_prec = estsz < 1000000 ? 2 : estsz < 10000000 ? 1 : 0;
+        estsz_num = estsz < 1000 ? estsz : estsz / 1000;
+        estsz_unit = estsz < 1000 ? "K" : "M";
+        sprintf(buf, "x264 [%.1f%%] %d/%d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
+                percentage, i_frame, i_frame_total, fps_prec, fps, bitrate_prec, bitrate,
+                ete_hh, ete_mm, ete_ss,
+                eta_hh, eta_mm, eta_ss,
+                file_prec, file_num, file_unit,
+                estsz_prec, estsz_num, estsz_unit);
     }
     else
-        sprintf( buf, "x264 %d frames: %.2f fps, %.2f kb/s", i_frame, fps, bitrate );
+        sprintf(buf, "x264 %d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d | %.*f %sB",
+                i_frame, fps_prec, fps, bitrate_prec, bitrate,
+                ete_hh, ete_mm, ete_ss,
+                file_prec, file_num, file_unit);
     fprintf( stderr, "%s  \r", buf+5 );
     x264_cli_set_console_title( buf );
     fflush( stderr ); // needed in windows
@@ -2063,8 +2177,11 @@ fail:
 
     i_end = x264_mdate();
     /* Erase progress indicator before printing encoding stats. */
-    if( opt->b_progress )
-        fprintf( stderr, "                                                                               \r" );
+    if (opt->b_progress && i_frame_output)
+    {
+        print_status(i_start, 0, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts);
+        fprintf(stderr, "\n");
+    }
     if( h )
         x264_encoder_close( h );
     fprintf( stderr, "\n" );
@@ -2079,9 +2196,11 @@ fail:
     {
         double fps = (double)i_frame_output * (double)1000000 /
                      (double)( i_end - i_start );
+        int secs = (i_end - i_start) / 1000000;
 
-        fprintf( stderr, "encoded %d frames, %.2f fps, %.2f kb/s\n", i_frame_output, fps,
-                 (double) i_file * 8 / ( 1000 * duration ) );
+        fprintf(stderr, "encoded %d frames, %.2f fps, %.2f kb/s, duration %d:%02d:%02d.%02d\n", i_frame_output, fps,
+                (double)i_file * 8 / (1000 * duration),
+                secs / 3600, (secs / 60) % 60, secs % 60, (int)((i_end - i_start) % 1000000 / 10000));
     }
 
     return retval;
