@@ -318,6 +318,17 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         return -1;
     x264_cli_log( "avs ", X264_LOG_DEBUG, "using avisynth version %.2f\n", avs_version );
 
+	if ( AVS_IS_AVISYNTHPLUS )
+        {
+            FAIL_IF_ERROR( !h->func.avs_function_exists( h->env, "VersionString" ), "VersionString does not exist\n" );
+            AVS_Value ver = h->func.avs_invoke( h->env, "VersionString", avs_new_value_array(NULL, 0), NULL );
+            FAIL_IF_ERROR( avs_is_error( ver ), "unable to determine avisynth+ version: %s\n", avs_as_error( ver ) );
+            FAIL_IF_ERROR( !avs_is_string( ver ), "VersionString did not return a string value\n" );
+            const char *avsplus_version = avs_as_string( ver );
+            h->func.avs_release_value( ver );
+            x264_cli_log( "avs ", X264_LOG_INFO, "%s\n", avsplus_version );
+        }
+
 #ifdef _WIN32
     /* Avisynth doesn't support Unicode filenames. */
     char *ansi_filename = utf8_to_ansi( psz_filename );
