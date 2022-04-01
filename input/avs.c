@@ -578,7 +578,7 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
     for( int i = 0; i < pic->img.planes; i++ )
     {
         pic->img.plane[i] = (uint8_t*)AVS_GET_READ_PTR_P( frm, planes[i] );
-        pic->img.stride[i] = AVS_GET_PITCH_P( frm, plane[i] );
+        pic->img.stride[i] = AVS_GET_PITCH_P( frm, planes[i] );
         if (h->uc_depth)
         {
             /* upconvert non 16bit high depth planes to 16bit using the same
