@@ -1703,6 +1703,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     }
     if( !h->param.cpu )
         p += sprintf( p, " none!" );
+    x264_log( h, X264_LOG_INFO, "AVC Encoder x264 core %d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION );
     x264_log( h, X264_LOG_INFO, "%s\n", buf );
 
     if( x264_analyse_init_costs( h ) )
@@ -1849,8 +1850,16 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
         snprintf( level, sizeof(level), "%d.%d", h->sps->i_level_idc / 10, h->sps->i_level_idc % 10 );
 
     static const char * const subsampling[4] = { "4:0:0", "4:2:0", "4:2:2", "4:4:4" };
-    x264_log( h, X264_LOG_INFO, "profile %s, level %s, %s, %d-bit\n",
+    x264_log(h, X264_LOG_INFO, "profile: %s, level: %s, subsampling: %s, bit-depth: %d-bit\n",
               profile, level, subsampling[CHROMA_FORMAT], BIT_DEPTH );
+
+    char *opts = x264_param2string( &h->param, 0 );
+    if( opts )
+    {
+        x264_log( h, X264_LOG_INFO, "%s\n", opts );
+        x264_free( opts );
+    }
+
 
     return h;
 fail:
