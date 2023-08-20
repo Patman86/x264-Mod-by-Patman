@@ -686,7 +686,8 @@ static void help( x264_param_t *defaults, int longhelp )
     H0( "\n" );
     H0( "Frame-type options:\n" );
     H0( "\n" );
-    H0( "  -I, --keyint <integer or \"infinite\"> Maximum GOP size [%d]\n", defaults->i_keyint_max );
+    H0( "  -I, --keyint <integer> <string or \"infinite\"> Maximum GOP size [%d]\n"
+        "                                  - auto: Set the keyint to fps * 10\n", defaults->i_keyint_max );
     H2( "  -i, --min-keyint <integer>  Minimum GOP size [auto]\n" );
     H2( "      --no-scenecut           Disable adaptive I-frame decision\n" );
     H2( "      --scenecut <integer>    How aggressively to insert extra I-frames [%d]\n", defaults->i_scenecut_threshold );
@@ -761,6 +762,7 @@ static void help( x264_param_t *defaults, int longhelp )
         "                                  - 3: Auto-variance AQ with bias to dark scenes\n", defaults->rc.i_aq_mode );
     H1( "      --aq-strength <float>   Reduces blocking and blurring in flat and\n"
         "                              textured areas. [%.1f]\n", defaults->rc.f_aq_strength );
+    H1( "      --aq-bias-strength <float> Adjust the bias to darks strength in AQ mode 3, effective bias is aq-strength * aq-bias-strength [%.1f]\n", defaults->rc.f_aq_bias_strength );
     H1( "\n" );
     H0( "  -p, --pass <integer>        Enable multipass ratecontrol\n"
         "                                  - 1: First pass, creates stats file\n"
@@ -1104,6 +1106,7 @@ static struct option long_options[] =
     { "no-fast-pskip",        no_argument,       NULL, 0 },
     { "no-dct-decimate",      no_argument,       NULL, 0 },
     { "aq-strength",          required_argument, NULL, 0 },
+    { "aq-bias-strength",     required_argument, NULL, 0 },
     { "aq-mode",              required_argument, NULL, 0 },
     { "deadzone-inter",       required_argument, NULL, 0 },
     { "deadzone-intra",       required_argument, NULL, 0 },

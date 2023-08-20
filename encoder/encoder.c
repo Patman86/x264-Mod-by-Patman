@@ -608,6 +608,17 @@ static int validate_parameters( x264_t *h, int b_open )
         }
     }
 
+    if( !h->param.i_fps_num || !h->param.i_fps_den )
+    {
+        h->param.i_fps_num = 25;
+        h->param.i_fps_den = 1;
+    }
+    float fps = (float) h->param.i_fps_num / h->param.i_fps_den;
+    if( h->param.i_keyint_max == X264_KEYINT_MAX_AUTO )
+    {
+        h->param.i_keyint_max = (int)ceilf( fps ) * 10;
+        x264_log( h, X264_LOG_INFO, "keyint is automatically set to %d.\n", h->param.i_keyint_max );
+    }
     h->param.i_keyint_max = x264_clip3( h->param.i_keyint_max, 1, X264_KEYINT_MAX_INFINITE );
     if( h->param.i_keyint_max == 1 )
     {
@@ -1100,12 +1111,6 @@ static int validate_parameters( x264_t *h, int b_open )
         x264_log( h, X264_LOG_WARNING, "intra-refresh is not compatible with open-gop\n" );
         h->param.b_open_gop = 0;
     }
-    if( !h->param.i_fps_num || !h->param.i_fps_den )
-    {
-        h->param.i_fps_num = 25;
-        h->param.i_fps_den = 1;
-    }
-    float fps = (float)h->param.i_fps_num / h->param.i_fps_den;
     if( h->param.i_keyint_min == X264_KEYINT_MIN_AUTO )
         h->param.i_keyint_min = X264_MIN( h->param.i_keyint_max / 10, (int)fps );
     h->param.i_keyint_min = x264_clip3( h->param.i_keyint_min, 1, h->param.i_keyint_max/2+1 );

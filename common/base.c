@@ -414,6 +414,7 @@ REALIGN_STACK void x264_param_default( x264_param_t *param )
     param->rc.f_pb_factor = 1.3;
     param->rc.i_aq_mode = X264_AQ_VARIANCE;
     param->rc.f_aq_strength = 1.0;
+    param->rc.f_aq_bias_strength = 1.0;
     param->rc.i_lookahead = 40;
 
     param->rc.b_stat_write = 0;
@@ -1078,13 +1079,15 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     {
         if( strstr( value, "infinite" ) )
             p->i_keyint_max = X264_KEYINT_MAX_INFINITE;
+        else if( !strcmp( value, "auto" ) || atoi(value) < 0 )
+            p->i_keyint_max = X264_KEYINT_MAX_AUTO;
         else
             p->i_keyint_max = atoi(value);
     }
     OPT2("min-keyint", "keyint-min")
     {
         p->i_keyint_min = atoi(value);
-        if( p->i_keyint_max < p->i_keyint_min )
+        if( p->i_keyint_max != X264_KEYINT_MAX_AUTO && p->i_keyint_max < p->i_keyint_min )
             p->i_keyint_max = p->i_keyint_min;
     }
     OPT("scenecut")
@@ -1346,6 +1349,8 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
         p->rc.i_aq_mode = atoi(value);
     OPT("aq-strength")
         p->rc.f_aq_strength = atof(value);
+    OPT("aq-bias-strength")
+        p->rc.f_aq_bias_strength = atof(value);
     OPT("pass")
     {
         int pass = x264_clip3( atoi(value), 0, 3 );
@@ -1557,6 +1562,8 @@ char *x264_param2string( x264_param_t *p, int b_res )
         s += sprintf( s, " aq=%d", p->rc.i_aq_mode );
         if( p->rc.i_aq_mode )
             s += sprintf( s, ":%.2f", p->rc.f_aq_strength );
+        if( p->rc.i_aq_mode == X264_AQ_AUTOVARIANCE_BIASED )
+            s += sprintf( s, ":%.2f", p->rc.f_aq_bias_strength );
         if( p->rc.psz_zones )
             s += sprintf( s, " zones=%s", p->rc.psz_zones );
         else if( p->rc.i_zones )
