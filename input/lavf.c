@@ -41,7 +41,6 @@ typedef struct
     AVFormatContext *lavf;
     AVCodecContext *lavc;
     AVFrame *frame;
-    AVPacket *pkt;
     int stream_id;
     int next_frame;
     int vfr_input;
@@ -97,7 +96,10 @@ static int read_frame_internal( cli_pic_t *p_pic, lavf_hnd_t *h, int i_frame, vi
             return 0;
     }
 
-    AVPacket *pkt = h->pkt;
+    AVPacket pkt;
+    av_init_packet( &pkt );
+    pkt.data = NULL;
+    pkt.size = 0;
 
     while( i_frame >= h->next_frame )
     {
@@ -107,15 +109,15 @@ static int read_frame_internal( cli_pic_t *p_pic, lavf_hnd_t *h, int i_frame, vi
         {
             if( ret == AVERROR(EAGAIN) )
             {
-                while( !(ret = av_read_frame( h->lavf, pkt )) && pkt->stream_index != h->stream_id )
-                    av_packet_unref( pkt );
+                while( !(ret = av_read_frame( h->lavf, &pkt )) && pkt.stream_index != h->stream_id )
+                    av_packet_unref( &pkt );
 
                 if( ret )
                     ret = avcodec_send_packet( h->lavc, NULL );
                 else
                 {
-                    ret = avcodec_send_packet( h->lavc, pkt );
-                    av_packet_unref( pkt );
+                    ret = avcodec_send_packet( h->lavc, &pkt );
+                    av_packet_unref( &pkt );
                 }
             }
             else if( ret == AVERROR_EOF )
@@ -173,9 +175,6 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     h->frame = av_frame_alloc();
     if( !h->frame )
         return -1;
-    h->pkt = av_packet_alloc();
-    if( !h->pkt )
-        return -1;
 
     /* if resolution was passed in, place it and colorspace into options. this allows raw video support */
     AVDictionary *options = NULL;
@@ -206,14 +205,16 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     if( !h->lavc )
         return -1;
 
-    info->fps_num      = h->lavf->streams[i]->avg_frame_rate.num;
-    info->fps_den      = h->lavf->streams[i]->avg_frame_rate.den;
-    info->timebase_num = h->lavf->streams[i]->time_base.num;
-    info->timebase_den = h->lavf->streams[i]->time_base.den;
+    AVStream * s = h->lavf->streams[i];
+    info->fps_num = s->avg_frame_rate.num;
+    info->fps_den = s->avg_frame_rate.den;
+    info->timebase_num = s->time_base.num;
+    info->timebase_den = s->time_base.den;
     /* lavf is thread unsafe as calling av_read_frame invalidates previously read AVPackets */
     info->thread_safe  = 0;
     h->vfr_input       = info->vfr;
-    FAIL_IF_ERROR( avcodec_open2( h->lavc, avcodec_find_decoder( h->lavc->codec_id ), NULL ),
+    AVCodec * p = avcodec_find_decoder(h->lavc->codec_id);
+    FAIL_IF_ERROR(avcodec_open2(h->lavc, p, NULL),
                    "could not find decoder for video stream\n" );
 
     /* prefetch the first frame and set/confirm flags */
@@ -226,15 +227,38 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     info->width      = h->lavc->width;
     info->height     = h->lavc->height;
     info->csp        = h->first_pic->img.csp;
-    info->num_frames = h->lavf->streams[i]->nb_frames;
+    info->num_frames = s->nb_frames;
     info->sar_height = h->lavc->sample_aspect_ratio.den;
     info->sar_width  = h->lavc->sample_aspect_ratio.num;
     info->fullrange |= h->lavc->color_range == AVCOL_RANGE_JPEG;
+
+    /* -1 = 'unset' (internal) , 2 from lavf|ffms = 'unset' */
+    if (h->lavc->colorspace >= 0 && h->lavc->colorspace <= 8 && h->lavc->colorspace != 2)
+        info->colormatrix = h->lavc->colorspace;
+    else
+        info->colormatrix = -1;
 
     /* avisynth stores rgb data vertically flipped. */
     if( !strcasecmp( get_filename_extension( psz_filename ), "avs" ) &&
         (h->lavc->pix_fmt == AV_PIX_FMT_BGRA || h->lavc->pix_fmt == AV_PIX_FMT_BGR24) )
         info->csp |= X264_CSP_VFLIP;
+
+    /* show video info */
+    double duration = s->duration * av_q2d(s->time_base);
+    const AVPixFmtDescriptor * pix_desc = av_pix_fmt_desc_get(h->lavc->pix_fmt);
+    x264_cli_log("lavf", X264_LOG_INFO,
+        "\n Format    : %s"
+        "\n Codec     : %s ( %s )"
+        "\n PixFmt    : %s"
+        "\n Framerate : %d/%d"
+        "\n Timebase  : %d/%d"
+        "\n Duration  : %d:%02d:%02d\n",
+        format ? format->name : h->lavf->iformat->name,
+        p->name, p->long_name,
+        pix_desc->name,
+        s->avg_frame_rate.num, s->avg_frame_rate.den,
+        s->time_base.num, s->time_base.den,
+        (int)duration / 60 / 60, (int)duration / 60 % 60, (int)duration - (int)duration / 60 * 60);
 
     *p_handle = h;
 
@@ -265,7 +289,6 @@ static int close_file( hnd_t handle )
     lavf_hnd_t *h = handle;
     avcodec_free_context( &h->lavc );
     avformat_close_input( &h->lavf );
-    av_packet_free( &h->pkt );
     av_frame_free( &h->frame );
     free( h );
     return 0;
