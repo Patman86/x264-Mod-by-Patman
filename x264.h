@@ -225,6 +225,7 @@ typedef struct x264_nal_t
 #define X264_B_PYRAMID_NORMAL        2
 #define X264_KEYINT_MIN_AUTO         0
 #define X264_KEYINT_MAX_INFINITE     (1<<30)
+#define X264_KEYINT_MAX_AUTO         (-1)
 
 /* AVC-Intra flavors */
 #define X264_AVCINTRA_FLAVOR_PANASONIC 0
@@ -460,6 +461,7 @@ typedef struct x264_param_t
 
         int         i_aq_mode;      /* psy adaptive QP. (X264_AQ_*) */
         float       f_aq_strength;
+        float       f_aq_bias_strength; /* Fine-tune AQ mode 3 dark bias. */
         int         b_mb_tree;      /* Macroblock-tree ratecontrol. */
         int         i_lookahead;
 
