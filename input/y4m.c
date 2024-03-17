@@ -77,10 +77,12 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     int colorspace = X264_CSP_NONE;
     int alt_colorspace = X264_CSP_NONE;
     int alt_bit_depth  = 8;
+    int found_length = 0;
     if( !h )
         return -1;
 
     info->vfr = 0;
+    info->num_frames = 0;
 
     if( !strcmp( psz_filename, "-" ) )
         h->fh = stdin;
@@ -181,6 +183,15 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
                     else if( !strncmp( "LIMITED", tokstart, 7 ) )
                         info->fullrange = 0;
                 }
+                if (!strncmp("LENGTH=", tokstart, 7))
+                {
+                    tokstart += 7;
+                    if (sscanf(tokstart, "%d", &info->num_frames) == 1)
+                    {
+                        x264_cli_log("y4m ", X264_LOG_DEBUG, "found header LENGTH: %d.\n", info->num_frames);
+                        found_length = 1;
+                    }
+                }
                 tokstart = strchr( tokstart, 0x20 );
                 break;
         }
@@ -203,7 +214,6 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     FAIL_IF_ERROR( h->bit_depth < 8 || h->bit_depth > 16, "unsupported bit depth `%d'\n", h->bit_depth );
 
     info->thread_safe = 1;
-    info->num_frames  = 0;
     info->csp         = colorspace;
 
     if( h->bit_depth > 8 )
@@ -234,7 +244,9 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         fseek( h->fh, 0, SEEK_END );
         int64_t i_size = ftell( h->fh );
         fseek( h->fh, init_pos, SEEK_SET );
-        info->num_frames = (i_size - h->seq_header_len) / h->frame_size;
+        /* Don't need to estimate num_frames twice */
+        if (!found_length)
+            info->num_frames = (i_size - h->seq_header_len) / h->frame_size;
         FAIL_IF_ERROR( !info->num_frames, "empty input file\n" );
 
         /* Attempt to use memory-mapped input frames if possible */
