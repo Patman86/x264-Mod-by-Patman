@@ -16,9 +16,6 @@ if [ -d .git ] && command -v git >/dev/null 2>&1 ; then
         if [ "$ver_diff" -ne 0 ] ; then
             ver="$ver+$ver_diff"
         fi
-        if git status | grep -q "modified:" ; then
-            ver="${ver}M"
-        fi
         ver="$ver $(git rev-list -n 1 HEAD | cut -c 1-7)"
         version=" r$ver"
     fi

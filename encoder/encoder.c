@@ -608,6 +608,17 @@ static int validate_parameters( x264_t *h, int b_open )
         }
     }
 
+    if( !h->param.i_fps_num || !h->param.i_fps_den )
+    {
+        h->param.i_fps_num = 25;
+        h->param.i_fps_den = 1;
+    }
+    float fps = (float) h->param.i_fps_num / h->param.i_fps_den;
+    if( h->param.i_keyint_max == X264_KEYINT_MAX_AUTO )
+    {
+        h->param.i_keyint_max = (int)ceilf( fps ) * 10;
+        x264_log( h, X264_LOG_INFO, "keyint is automatically set to %d.\n", h->param.i_keyint_max );
+    }
     h->param.i_keyint_max = x264_clip3( h->param.i_keyint_max, 1, X264_KEYINT_MAX_INFINITE );
     if( h->param.i_keyint_max == 1 )
     {
@@ -1100,12 +1111,6 @@ static int validate_parameters( x264_t *h, int b_open )
         x264_log( h, X264_LOG_WARNING, "intra-refresh is not compatible with open-gop\n" );
         h->param.b_open_gop = 0;
     }
-    if( !h->param.i_fps_num || !h->param.i_fps_den )
-    {
-        h->param.i_fps_num = 25;
-        h->param.i_fps_den = 1;
-    }
-    float fps = (float)h->param.i_fps_num / h->param.i_fps_den;
     if( h->param.i_keyint_min == X264_KEYINT_MIN_AUTO )
         h->param.i_keyint_min = X264_MIN( h->param.i_keyint_max / 10, (int)fps );
     h->param.i_keyint_min = x264_clip3( h->param.i_keyint_min, 1, h->param.i_keyint_max/2+1 );
@@ -1703,6 +1708,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     }
     if( !h->param.cpu )
         p += sprintf( p, " none!" );
+    x264_log( h, X264_LOG_INFO, "AVC Encoder x264 core %d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION );
     x264_log( h, X264_LOG_INFO, "%s\n", buf );
 
     if( x264_analyse_init_costs( h ) )
@@ -1849,8 +1855,16 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
         snprintf( level, sizeof(level), "%d.%d", h->sps->i_level_idc / 10, h->sps->i_level_idc % 10 );
 
     static const char * const subsampling[4] = { "4:0:0", "4:2:0", "4:2:2", "4:4:4" };
-    x264_log( h, X264_LOG_INFO, "profile %s, level %s, %s, %d-bit\n",
+    x264_log(h, X264_LOG_INFO, "profile: %s, level: %s, subsampling: %s, bit-depth: %d-bit\n",
               profile, level, subsampling[CHROMA_FORMAT], BIT_DEPTH );
+
+    char *opts = x264_param2string( &h->param, 0 );
+    if( opts )
+    {
+        x264_log( h, X264_LOG_INFO, "%s\n", opts );
+        x264_free( opts );
+    }
+
 
     return h;
 fail:
