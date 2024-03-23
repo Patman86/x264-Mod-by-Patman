@@ -71,19 +71,19 @@ void x264_log_default( void *p_unused, int i_level, const char *psz_fmt, va_list
     switch( i_level )
     {
         case X264_LOG_ERROR:
-            psz_prefix = "error";
+            psz_prefix = "FLAW";
             break;
         case X264_LOG_WARNING:
-            psz_prefix = "warning";
+            psz_prefix = "WARN";
             break;
         case X264_LOG_INFO:
-            psz_prefix = "info";
+            psz_prefix = "INFO";
             break;
         case X264_LOG_DEBUG:
-            psz_prefix = "debug";
+            psz_prefix = "DEBU";
             break;
         default:
-            psz_prefix = "unknown";
+            psz_prefix = "ANON";
             break;
     }
     fprintf( stderr, "x264 [%s]: ", psz_prefix );
@@ -156,6 +156,34 @@ void x264_free( void *p )
         free( *( ( ( void **) p ) - 1 ) );
 #endif
     }
+}
+
+/****************************************************************************
+ * x264_ntsc_fps:
+ ****************************************************************************/
+void x264_ntsc_fps( uint32_t *fps_num, uint32_t *fps_den )
+{
+    if( !*fps_num || !*fps_den )
+        return;
+
+#define X264_NTSC_TIMEBASE 1001
+    const double f_ntsc_mod6_quotient = (double) X264_NTSC_TIMEBASE / 6.;
+    const double f_fps                = (double) *fps_num / (double) *fps_den;
+    const double f_interval           = 1000. / f_fps;
+
+    const uint32_t i_nearest_ntsc_mod6_num = (uint32_t) ( f_ntsc_mod6_quotient / f_interval + 0.5 );
+    if( !i_nearest_ntsc_mod6_num )
+        return;
+    const double   f_nearest_ntsc_interval = f_ntsc_mod6_quotient / (double) i_nearest_ntsc_mod6_num;
+
+    if ( fabs ( f_interval - f_nearest_ntsc_interval ) < ( 1. / ( f_fps + 1. ) ) )    // error < ( 1 / fps + 1 )
+    {
+        *fps_num = i_nearest_ntsc_mod6_num * 6000;
+        *fps_den = X264_NTSC_TIMEBASE;
+    }
+#undef X264_NTSC_TIMEBASE
+
+    return;
 }
 
 /****************************************************************************
@@ -414,6 +442,7 @@ REALIGN_STACK void x264_param_default( x264_param_t *param )
     param->rc.f_pb_factor = 1.3;
     param->rc.i_aq_mode = X264_AQ_VARIANCE;
     param->rc.f_aq_strength = 1.0;
+    param->rc.f_aq_bias_strength = 1.0;
     param->rc.i_lookahead = 40;
 
     param->rc.b_stat_write = 0;
@@ -1078,13 +1107,15 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     {
         if( strstr( value, "infinite" ) )
             p->i_keyint_max = X264_KEYINT_MAX_INFINITE;
+        else if( !strcmp( value, "auto" ) || atoi(value) < 0 )
+            p->i_keyint_max = X264_KEYINT_MAX_AUTO;
         else
             p->i_keyint_max = atoi(value);
     }
     OPT2("min-keyint", "keyint-min")
     {
         p->i_keyint_min = atoi(value);
-        if( p->i_keyint_max < p->i_keyint_min )
+        if( p->i_keyint_max != X264_KEYINT_MAX_AUTO && p->i_keyint_max < p->i_keyint_min )
             p->i_keyint_max = p->i_keyint_min;
     }
     OPT("scenecut")
@@ -1333,9 +1364,31 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     OPT("ratetol")
         p->rc.f_rate_tolerance = !strncmp("inf", value, 3) ? 1e9 : atof(value);
     OPT("vbv-maxrate")
-        p->rc.i_vbv_max_bitrate = atoi(value);
+        if( !strcmp(value, "auto_high444") )
+            p->rc.i_vbv_max_bitrate = X264_VBV_MAXRATE_HIGH444;
+        else if( !strcmp(value, "auto_high422") )
+            p->rc.i_vbv_max_bitrate = X264_VBV_MAXRATE_HIGH422;
+        else if( !strcmp(value, "auto_high10") )
+            p->rc.i_vbv_max_bitrate = X264_VBV_MAXRATE_HIGH10;
+        else if( !strcmp(value, "auto_high") )
+            p->rc.i_vbv_max_bitrate = X264_VBV_MAXRATE_HIGH;
+        else if( !strcmp(value, "auto_main") )
+            p->rc.i_vbv_max_bitrate = X264_VBV_MAXRATE_MAIN;
+        else
+            p->rc.i_vbv_max_bitrate = atoi(value);
     OPT("vbv-bufsize")
-        p->rc.i_vbv_buffer_size = atoi(value);
+        if( !strcmp(value, "auto_high444") )
+            p->rc.i_vbv_buffer_size = X264_VBV_BUFSIZE_HIGH444;
+        else if( !strcmp(value, "auto_high422") )
+            p->rc.i_vbv_buffer_size = X264_VBV_BUFSIZE_HIGH422;
+        else if( !strcmp(value, "auto_high10") )
+            p->rc.i_vbv_buffer_size = X264_VBV_BUFSIZE_HIGH10;
+        else if( !strcmp(value, "auto_high") )
+            p->rc.i_vbv_buffer_size = X264_VBV_BUFSIZE_HIGH;
+        else if( !strcmp(value, "auto_main") )
+            p->rc.i_vbv_buffer_size = X264_VBV_BUFSIZE_MAIN;
+        else
+            p->rc.i_vbv_buffer_size = atoi(value);
     OPT("vbv-init")
         p->rc.f_vbv_buffer_init = atof(value);
     OPT2("ipratio", "ip-factor")
@@ -1346,6 +1399,8 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
         p->rc.i_aq_mode = atoi(value);
     OPT("aq-strength")
         p->rc.f_aq_strength = atof(value);
+    OPT("aq-bias-strength")
+        p->rc.f_aq_bias_strength = atof(value);
     OPT("pass")
     {
         int pass = x264_clip3( atoi(value), 0, 3 );
@@ -1557,6 +1612,8 @@ char *x264_param2string( x264_param_t *p, int b_res )
         s += sprintf( s, " aq=%d", p->rc.i_aq_mode );
         if( p->rc.i_aq_mode )
             s += sprintf( s, ":%.2f", p->rc.f_aq_strength );
+        if( p->rc.i_aq_mode == X264_AQ_AUTOVARIANCE_BIASED )
+            s += sprintf( s, ":%.2f", p->rc.f_aq_bias_strength );
         if( p->rc.psz_zones )
             s += sprintf( s, " zones=%s", p->rc.psz_zones );
         else if( p->rc.i_zones )
