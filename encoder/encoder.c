@@ -608,6 +608,17 @@ static int validate_parameters( x264_t *h, int b_open )
         }
     }
 
+    if( !h->param.i_fps_num || !h->param.i_fps_den )
+    {
+        h->param.i_fps_num = 25;
+        h->param.i_fps_den = 1;
+    }
+    float fps = (float) h->param.i_fps_num / h->param.i_fps_den;
+    if( h->param.i_keyint_max == X264_KEYINT_MAX_AUTO )
+    {
+        h->param.i_keyint_max = (int)ceilf( fps ) * 10;
+        x264_log( h, X264_LOG_INFO, "keyint is automatically set to %d.\n", h->param.i_keyint_max );
+    }
     h->param.i_keyint_max = x264_clip3( h->param.i_keyint_max, 1, X264_KEYINT_MAX_INFINITE );
     if( h->param.i_keyint_max == 1 )
     {
@@ -689,6 +700,55 @@ static int validate_parameters( x264_t *h, int b_open )
             x264_log( h, X264_LOG_ERROR, "profile is optional; x264 defaults to high\n" );
             return -1;
         }
+    }
+
+    h->param.i_frame_reference = x264_clip3( h->param.i_frame_reference, 1, X264_REF_MAX );
+
+    if( b_open )
+    {
+        const x264_level_t *l = x264_levels;
+        if( h->param.i_level_idc == X264_LEVEL_IDC_AUTO )
+        {
+            int maxrate_bak = h->param.rc.i_vbv_max_bitrate;
+            if( h->param.rc.i_rc_method == X264_RC_ABR && h->param.rc.i_vbv_buffer_size <= 0 )
+                h->param.rc.i_vbv_max_bitrate = h->param.rc.i_bitrate * 2;
+            x264_sps_init( h->sps, h->param.i_sps_id, &h->param );
+            do h->param.i_level_idc = l->level_idc;
+                while( l[1].level_idc && x264_validate_levels( h, 0 ) && l++ );
+            h->param.rc.i_vbv_max_bitrate = maxrate_bak;
+        }
+        else
+        {
+            while( l->level_idc && l->level_idc != h->param.i_level_idc )
+                l++;
+            if( l->level_idc == 0 )
+            {
+                x264_log( h, X264_LOG_ERROR, "invalid level_idc: %d\n", h->param.i_level_idc );
+                return -1;
+            }
+        }
+        if( h->param.rc.i_vbv_max_bitrate < 0 )
+        {
+            int cbp_factor = h->param.rc.i_vbv_max_bitrate == X264_VBV_MAXRATE_HIGH444 ? 16 :
+                             h->param.rc.i_vbv_max_bitrate == X264_VBV_MAXRATE_HIGH422 ? 16 :
+                             h->param.rc.i_vbv_max_bitrate == X264_VBV_MAXRATE_HIGH10 ? 12 :
+                             h->param.rc.i_vbv_max_bitrate == X264_VBV_MAXRATE_HIGH ? 5 : 4;
+            h->param.rc.i_vbv_max_bitrate = (l->bitrate * cbp_factor) / 4;
+            x264_log( h, X264_LOG_INFO, "VBV maxrate is automatically set to %d.\n", h->param.rc.i_vbv_max_bitrate );
+        }
+        if( h->param.rc.i_vbv_buffer_size < 0 )
+        {
+            int cbp_factor = h->param.rc.i_vbv_buffer_size == X264_VBV_BUFSIZE_HIGH444 ? 16 :
+                             h->param.rc.i_vbv_buffer_size == X264_VBV_BUFSIZE_HIGH422 ? 16 :
+                             h->param.rc.i_vbv_buffer_size == X264_VBV_BUFSIZE_HIGH10 ? 12 :
+                             h->param.rc.i_vbv_buffer_size == X264_VBV_BUFSIZE_HIGH ? 5 : 4;
+            h->param.rc.i_vbv_buffer_size = (l->cpb * cbp_factor) / 4;
+            x264_log( h, X264_LOG_INFO, "VBV bufsize is automatically set to %d.\n", h->param.rc.i_vbv_buffer_size );
+        }
+        if( h->param.analyse.i_mv_range <= 0 )
+            h->param.analyse.i_mv_range = l->mv_range >> PARAM_INTERLACED;
+        else
+            h->param.analyse.i_mv_range = x264_clip3(h->param.analyse.i_mv_range, 32, 512 >> PARAM_INTERLACED);
     }
 
     if( h->param.rc.i_rc_method < 0 || h->param.rc.i_rc_method > 2 )
@@ -1100,12 +1160,6 @@ static int validate_parameters( x264_t *h, int b_open )
         x264_log( h, X264_LOG_WARNING, "intra-refresh is not compatible with open-gop\n" );
         h->param.b_open_gop = 0;
     }
-    if( !h->param.i_fps_num || !h->param.i_fps_den )
-    {
-        h->param.i_fps_num = 25;
-        h->param.i_fps_den = 1;
-    }
-    float fps = (float)h->param.i_fps_num / h->param.i_fps_den;
     if( h->param.i_keyint_min == X264_KEYINT_MIN_AUTO )
         h->param.i_keyint_min = X264_MIN( h->param.i_keyint_max / 10, (int)fps );
     h->param.i_keyint_min = x264_clip3( h->param.i_keyint_min, 1, h->param.i_keyint_max/2+1 );
@@ -1179,7 +1233,7 @@ static int validate_parameters( x264_t *h, int b_open )
     if( h->param.rc.f_aq_strength == 0 )
         h->param.rc.i_aq_mode = 0;
 
-    if( h->param.i_log_level < X264_LOG_INFO )
+    if( h->param.i_log_level < X264_LOG_INFO && (!h->param.psz_log_file || h->param.i_log_file_level < X264_LOG_INFO) )
     {
         h->param.analyse.b_psnr = 0;
         h->param.analyse.b_ssim = 0;
@@ -1703,6 +1757,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     }
     if( !h->param.cpu )
         p += sprintf( p, " none!" );
+    x264_log( h, X264_LOG_INFO, "AVC Encoder x264 core %d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION );
     x264_log( h, X264_LOG_INFO, "%s\n", buf );
 
     if( x264_analyse_init_costs( h ) )
@@ -1849,8 +1904,16 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
         snprintf( level, sizeof(level), "%d.%d", h->sps->i_level_idc / 10, h->sps->i_level_idc % 10 );
 
     static const char * const subsampling[4] = { "4:0:0", "4:2:0", "4:2:2", "4:4:4" };
-    x264_log( h, X264_LOG_INFO, "profile %s, level %s, %s, %d-bit\n",
+    x264_log(h, X264_LOG_INFO, "profile: %s, level: %s, subsampling: %s, bit-depth: %d-bit\n",
               profile, level, subsampling[CHROMA_FORMAT], BIT_DEPTH );
+
+    char *opts = x264_param2string( &h->param, 0 );
+    if( opts )
+    {
+        x264_log( h, X264_LOG_INFO, "%s\n", opts );
+        x264_free( opts );
+    }
+
 
     return h;
 fail:
@@ -2987,7 +3050,7 @@ cont:
 
         int b_intra = IS_INTRA( h->mb.i_type );
         int b_skip = IS_SKIP( h->mb.i_type );
-        if( h->param.i_log_level >= X264_LOG_INFO || h->param.rc.b_stat_write )
+        if( h->param.i_log_level >= X264_LOG_INFO || (h->param.psz_log_file && h->param.i_log_file_level >= X264_LOG_INFO) || h->param.rc.b_stat_write )
         {
             if( !b_intra && !b_skip && !IS_DIRECT( h->mb.i_type ) )
             {
@@ -3007,7 +3070,7 @@ cont:
             }
         }
 
-        if( h->param.i_log_level >= X264_LOG_INFO )
+        if( h->param.i_log_level >= X264_LOG_INFO || (h->param.psz_log_file && h->param.i_log_file_level >= X264_LOG_INFO) )
         {
             if( h->mb.i_cbp_luma | h->mb.i_cbp_chroma )
             {
@@ -4093,6 +4156,10 @@ static int encoder_frame_end( x264_t *h, x264_t *thread_current,
     psz_message[0] = '\0';
     double dur = h->fenc->f_duration;
     h->stat.f_frame_duration[h->sh.i_type] += dur;
+
+    pic_out->prop.f_qp_avg_rc = h->fdec->f_qp_avg_rc;
+    pic_out->prop.f_qp_avg_aq = h->fdec->f_qp_avg_aq;
+
     if( h->param.analyse.b_psnr )
     {
         int64_t ssd[3] =

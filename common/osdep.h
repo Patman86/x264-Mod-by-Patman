@@ -144,8 +144,8 @@ static inline wchar_t *x264_utf8_to_utf16_try_buf( const char *utf8, wchar_t *bu
 static inline FILE *x264_fopen_internal( const char *filename, const wchar_t *mode_utf16 )
 {
     FILE *f = NULL;
-    wchar_t filename_buf[MAX_PATH];
-    wchar_t *filename_utf16 = x264_utf8_to_utf16_try_buf( filename, filename_buf, MAX_PATH );
+    wchar_t filename_buf[MAX_PATH*2];
+    wchar_t *filename_utf16 = x264_utf8_to_utf16_try_buf( filename, filename_buf, MAX_PATH*2 );
     if( filename_utf16 )
     {
         f = _wfopen( filename_utf16, mode_utf16 );
@@ -158,12 +158,12 @@ static inline FILE *x264_fopen_internal( const char *filename, const wchar_t *mo
 static inline int x264_rename( const char *oldname, const char *newname )
 {
     int ret = -1;
-    wchar_t oldname_buf[MAX_PATH];
-    wchar_t *oldname_utf16 = x264_utf8_to_utf16_try_buf( oldname, oldname_buf, MAX_PATH );
+    wchar_t oldname_buf[MAX_PATH*2];
+    wchar_t *oldname_utf16 = x264_utf8_to_utf16_try_buf( oldname, oldname_buf, MAX_PATH*2 );
     if( oldname_utf16 )
     {
-        wchar_t newname_buf[MAX_PATH];
-        wchar_t *newname_utf16 = x264_utf8_to_utf16_try_buf( newname, newname_buf, MAX_PATH );
+        wchar_t newname_buf[MAX_PATH*2];
+        wchar_t *newname_utf16 = x264_utf8_to_utf16_try_buf( newname, newname_buf, MAX_PATH*2 );
         if( newname_utf16 )
         {
             /* POSIX says that rename() removes the destination, but Win32 doesn't. */
@@ -184,8 +184,8 @@ static inline int x264_rename( const char *oldname, const char *newname )
 static inline int x264_stat( const char *path, x264_struct_stat *buf )
 {
     int ret = -1;
-    wchar_t path_buf[MAX_PATH];
-    wchar_t *path_utf16 = x264_utf8_to_utf16_try_buf( path, path_buf, MAX_PATH );
+    wchar_t path_buf[MAX_PATH*2];
+    wchar_t *path_utf16 = x264_utf8_to_utf16_try_buf( path, path_buf, MAX_PATH*2 );
     if( path_utf16 )
     {
         ret = _wstati64( path_utf16, buf );
@@ -242,8 +242,8 @@ static inline int x264_vfprintf( FILE *stream, const char *format, va_list arg )
 static inline int x264_is_regular_file_path( const char *path )
 {
     int ret = -1;
-    wchar_t path_buf[MAX_PATH];
-    wchar_t *path_utf16 = x264_utf8_to_utf16_try_buf( path, path_buf, MAX_PATH );
+    wchar_t path_buf[MAX_PATH*2];
+    wchar_t *path_utf16 = x264_utf8_to_utf16_try_buf( path, path_buf, MAX_PATH*2 );
     if( path_utf16 )
     {
         x264_struct_stat buf;
@@ -434,7 +434,7 @@ X264_API int x264_threading_init( void );
 static ALWAYS_INLINE int x264_pthread_fetch_and_add( int *val, int add, x264_pthread_mutex_t *mutex )
 {
 #if HAVE_THREAD
-#if defined(__GNUC__) && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ > 0) && (ARCH_X86 || ARCH_X86_64)
+#if defined(__GNUC__) && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ > 0) && HAVE_SYNC_FETCH_AND_ADD
     return __sync_fetch_and_add( val, add );
 #else
     x264_pthread_mutex_lock( mutex );

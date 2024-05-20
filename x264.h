@@ -225,6 +225,8 @@ typedef struct x264_nal_t
 #define X264_B_PYRAMID_NORMAL        2
 #define X264_KEYINT_MIN_AUTO         0
 #define X264_KEYINT_MAX_INFINITE     (1<<30)
+#define X264_KEYINT_MAX_AUTO         (-1)
+#define X264_LEVEL_IDC_AUTO          (-1)
 
 /* AVC-Intra flavors */
 #define X264_AVCINTRA_FLAVOR_PANASONIC 0
@@ -244,6 +246,7 @@ static const char * const x264_colmatrix_names[] = { "GBR", "bt709", "undef", ""
                                                      "smpte2085", "chroma-derived-nc", "chroma-derived-c", "ICtCp", 0 };
 static const char * const x264_nal_hrd_names[] = { "none", "vbr", "cbr", 0 };
 static const char * const x264_avcintra_flavor_names[] = { "panasonic", "sony", 0 };
+static const char * const x264_log_level_names[] = { "none", "error", "warning", "info", "debug", 0 };
 
 /* Colorspace type */
 #define X264_CSP_MASK           0x00ff  /* */
@@ -267,6 +270,7 @@ static const char * const x264_avcintra_flavor_names[] = { "panasonic", "sony", 
 #define X264_CSP_MAX            0x0011  /* end of list */
 #define X264_CSP_VFLIP          0x1000  /* the csp is vertically flipped */
 #define X264_CSP_HIGH_DEPTH     0x2000  /* the csp has a depth of 16 bits per pixel component */
+#define X264_CSP_SKIP_DEPTH_FILTER 0x0100  /* HACK: totally skips depth filter to prevent dither error */
 
 /* Slice type */
 #define X264_TYPE_AUTO          0x0000  /* Let x264 choose the right type */
@@ -306,6 +310,18 @@ typedef struct x264_zone_t
     float f_bitrate_factor;
     struct x264_param_t *param;
 } x264_zone_t;
+
+/* Auto VBV*/
+#define X264_VBV_MAXRATE_HIGH444 -5 /* Set the VBV maxrate to fit in the target level of High 4:4:4 Predictive Profile */
+#define X264_VBV_MAXRATE_HIGH422 -4 /* Set the VBV maxrate to fit in the target level of High 4:2:2 Profile */
+#define X264_VBV_MAXRATE_HIGH10  -3 /* Set the VBV maxrate to fit in the target level of High 10 Profile */
+#define X264_VBV_MAXRATE_HIGH    -2 /* Set the VBV maxrate to fit in the target level of High Profile */
+#define X264_VBV_MAXRATE_MAIN    -1 /* Set the VBV maxrate to fit in the target level of Main Profile */
+#define X264_VBV_BUFSIZE_HIGH444 -5 /* Set the VBV bufsize to fit in the target level of High 4:4:4 Predictive Profile */
+#define X264_VBV_BUFSIZE_HIGH422 -4 /* Set the VBV bufsize to fit in the target level of High 4:2:2 Profile */
+#define X264_VBV_BUFSIZE_HIGH10  -3 /* Set the VBV bufsize to fit in the target level of High 10 Profile */
+#define X264_VBV_BUFSIZE_HIGH    -2 /* Set the VBV bufsize to fit in the target level of High Profile */
+#define X264_VBV_BUFSIZE_MAIN    -1 /* Set the VBV bufsize to fit in the target level of Main Profile */
 
 typedef struct x264_param_t
 {
@@ -394,6 +410,8 @@ typedef struct x264_param_t
     void        (*pf_log)( void *, int i_level, const char *psz, va_list );
     void        *p_log_private;
     int         i_log_level;
+    int         i_log_file_level;
+    char        *psz_log_file;
     int         b_full_recon;   /* fully reconstruct frames, even when not necessary for encoding.  Implied by psz_dump_yuv */
     char        *psz_dump_yuv;  /* filename (in UTF-8) for reconstructed frames */
 
@@ -460,6 +478,7 @@ typedef struct x264_param_t
 
         int         i_aq_mode;      /* psy adaptive QP. (X264_AQ_*) */
         float       f_aq_strength;
+        float       f_aq_bias_strength; /* Fine-tune AQ mode 3 dark bias. */
         int         b_mb_tree;      /* Macroblock-tree ratecontrol. */
         int         i_lookahead;
 
@@ -530,6 +549,7 @@ typedef struct x264_param_t
     int b_pulldown;             /* use explicitly set timebase for CFR */
     uint32_t i_fps_num;
     uint32_t i_fps_den;
+    int b_accurate_fps;
     uint32_t i_timebase_num;    /* Timebase numerator */
     uint32_t i_timebase_den;    /* Timebase denominator */
 
@@ -771,6 +791,27 @@ typedef struct x264_hrd_t
     double dpb_output_time;
 } x264_hrd_t;
 
+enum x264_timecode_e
+{
+    X264_TIMECODE_SECONDS = 1,
+    X264_TIMECODE_MINUTES = 1 << 1,
+    X264_TIMECODE_HOURS   = 1 << 2,
+    X264_TIMECODE_FULL    = X264_TIMECODE_SECONDS | X264_TIMECODE_MINUTES | X264_TIMECODE_HOURS,
+};
+
+typedef struct x264_timecode_t
+{
+    int b_valid;
+    uint8_t i_hours;   /* 0..23  */
+    uint8_t i_minutes; /* 0..59  */
+    uint8_t i_seconds; /* 0..59  */
+    uint8_t i_frame;   /* 0..255, Less than `ceil(time_scale / (2 * num_units_in_tick))` */
+    int b_drop;
+    int b_discontinuity;
+    int i_counting_type;
+    int i_type;
+} x264_timecode_t;
+
 /* Arbitrary user SEI:
  * Payload size is in bytes and the payload pointer must be valid.
  * Payload types and syntax can be found in Annex D of the H.264 Specification.
@@ -854,9 +895,12 @@ typedef struct x264_image_properties_t
     double f_psnr_avg;
     /* Out: PSNR of Y, U, and V (if x264_param_t.b_psnr is set) */
     double f_psnr[3];
-
     /* Out: Average effective CRF of the encoded frame */
     double f_crf_avg;
+    /* Out: Average QPs of encoded frame as decided by RC */
+    float   f_qp_avg_rc;
+    /* Out: Average QPs of encoded frame as decided by AQ in addition to RC */
+    float   f_qp_avg_aq;
 } x264_image_properties_t;
 
 typedef struct x264_picture_t
@@ -895,6 +939,8 @@ typedef struct x264_picture_t
     /* In: optional information to modify encoder decisions for this frame
      * Out: information about the encoded frame */
     x264_image_properties_t prop;
+    /* In: arbitary user timecode */
+    x264_timecode_t timecode[3];
     /* Out: HRD timing information. Output only when i_nal_hrd is set. */
     x264_hrd_t hrd_timing;
     /* In: arbitrary user SEI (e.g subtitles, AFDs) */

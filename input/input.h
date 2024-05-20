@@ -48,11 +48,15 @@ typedef struct
     int output_csp; /* convert to this csp, if applicable */
     int output_range; /* user desired output range */
     int input_range; /* user override input range */
+    char* frameserver_lib_path; /* path to external frameserver library */
+    int b_accurate_fps;
+    int desired_bit_depth;
 } cli_input_opt_t;
 
 /* properties of the source given by the demuxer */
 typedef struct
 {
+    int colormatrix;
     int csp;         /* colorspace of the input */
     uint32_t fps_num;
     uint32_t fps_den;
@@ -102,6 +106,7 @@ typedef struct
 extern const cli_input_t raw_input;
 extern const cli_input_t y4m_input;
 extern const cli_input_t avs_input;
+extern const cli_input_t vpy_input;
 extern const cli_input_t thread_8_input;
 extern const cli_input_t thread_10_input;
 extern const cli_input_t lavf_input;

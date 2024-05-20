@@ -41,4 +41,12 @@ void x264_log( x264_t *h, int i_level, const char *psz_fmt, ... )
             h->param.pf_log( h->param.p_log_private, i_level, psz_fmt, arg );
         va_end( arg );
     }
+
+    if( h && h->param.psz_log_file && i_level <= h->param.i_log_file_level )
+    {
+        va_list arg;
+        va_start( arg, psz_fmt );
+        x264_log_file( h->param.psz_log_file, i_level, psz_fmt, arg );
+        va_end( arg );
+    }
 }
