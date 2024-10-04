@@ -319,7 +319,7 @@ static int open_file(char* psz_filename, hnd_t* p_handle, video_info_t* info, cl
 
     CREATE_FRAMEDONE_EVENTS()
 
-        const int intital_request_size = min(h->async_requests, h->num_frames - h->async_start_frame);
+    const int intital_request_size = min(h->async_requests, h->num_frames - h->async_start_frame);
     h->async_requested = h->async_start_frame + intital_request_size;
     for (int n = h->async_start_frame; n < h->async_start_frame + intital_request_size; n++)
     {
@@ -346,17 +346,18 @@ static int open_file(char* psz_filename, hnd_t* p_handle, video_info_t* info, cl
         info->csp = X264_CSP_I422;
     else if (format_id == pfYUV420P8)
         info->csp = X264_CSP_I420;
-    else if ( h->bit_depth == h->desired_bit_depth )
-        {
-            /* HACK: totally skips depth filter to prevent dither error */
-            info->csp |= X264_CSP_SKIP_DEPTH_FILTER;
-        }
     else
     {
         char format_name[32];
         h->vsapi->getVideoFormatName(&vi->format, format_name);
         FAIL_IF_ERROR(1, "not supported pixel type: %s\n", format_name);
     }
+
+    if ( h->bit_depth == h->desired_bit_depth )
+        {
+            /* HACK: totally skips depth filter to prevent dither error */
+            info->csp |= X264_CSP_SKIP_DEPTH_FILTER;
+        }
 
     *p_handle = h;
 
