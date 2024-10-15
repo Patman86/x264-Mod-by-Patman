@@ -1501,6 +1501,21 @@ static int parse_enum_value( const char *arg, const char * const *names, int *ds
     return -1;
 }
 
+char *StringPadRight(char *string, int padded_len, char *pad)
+{
+    int len = (int) strlen(string);
+    if (len >= padded_len)
+    {
+        return string;
+    }
+    int i;
+    for (i = 0; i < padded_len - len; i++)
+    {
+        strcat(string, pad);
+    }
+    return string;
+}
+
 static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
 {
     char *input_filename = NULL;
@@ -1769,21 +1784,6 @@ generic_option:
     video_info_t info = {0};
     char demuxername[5];
     int padLen = 4;
-
-	char *StringPadRight(char *string, int padded_len, char *pad)
-	{
-    int len = (int) strlen(string);
-    if (len >= padded_len)
-	{
-        return string;
-    }
-    int i;
-    for (i = 0; i < padded_len - len; i++)
-	{
-        strcat(string, pad);
-    }
-    return string;
-    }
 
     /* set info flags to be overwritten by demuxer as necessary. */
     info.colormatrix = param->vui.i_colmatrix;
