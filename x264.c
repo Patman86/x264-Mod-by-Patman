@@ -32,6 +32,11 @@
 /* The following two defines must be located before the inclusion of any system header files. */
 #define WINVER       0x0500
 #define _WIN32_WINNT 0x0500
+#endif
+
+#include "x264cli.h"
+
+#ifdef _WIN32
 #include <windows.h>
 #include <io.h>       /* _setmode() */
 #include <fcntl.h>    /* _O_BINARY */

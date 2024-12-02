@@ -412,9 +412,9 @@ NL="
 
 # list of all preprocessor HAVE values we can define
 CONFIG_HAVE="MALLOC_H ALTIVEC ALTIVEC_H MMX ARMV6 ARMV6T2 NEON AARCH64 BEOSTHREAD POSIXTHREAD WIN32THREAD THREAD LOG2F SWSCALE \
-
              LAVF FFMS GPAC AVS VPY GPL VECTOREXT INTERLACED CPU_COUNT OPENCL THP LSMASH X86_INLINE_ASM AS_FUNC INTEL_DISPATCHER \
-             MSA LSX MMAP WINRT VSX ARM_INLINE_ASM STRTOK_R CLOCK_GETTIME BITDEPTH8 BITDEPTH10 SVE SVE2 ELF_AUX_INFO GETAUXVAL"
+             MSA LSX MMAP WINRT VSX ARM_INLINE_ASM STRTOK_R CLOCK_GETTIME BITDEPTH8 BITDEPTH10 SVE SVE2 ELF_AUX_INFO GETAUXVAL \
+             SYSCONF"
 
 # parse options
 
@@ -650,6 +650,9 @@ if [ $compiler = GNU ]; then
     fi
     if cc_check '' -Werror=ignored-attributes ; then
         CHECK_CFLAGS="$CHECK_CFLAGS -Werror=ignored-attributes"
+    fi
+    if cc_check '' -Werror=implicit-function-declaration ; then
+        CHECK_CFLAGS="$CHECK_CFLAGS -Werror=implicit-function-declaration"
     fi
 fi
 
@@ -1165,6 +1168,10 @@ if cc_check 'sys/auxv.h' '' 'unsigned long auxv = 0; elf_aux_info(AT_HWCAP, &aux
     define HAVE_ELF_AUX_INFO
 fi
 
+if cc_check 'unistd.h' '' 'sysconf(0);' ; then
+    define HAVE_SYSCONF
+fi
+
 if [ "$SYS" != "WINDOWS" ] && cpp_check "sys/mman.h unistd.h" "" "defined(MAP_PRIVATE)"; then
     define HAVE_MMAP
 fi
@@ -1406,7 +1413,7 @@ if [ $SYS = WINDOWS -a $ARCH = X86 -a $compiler = GNU ] ; then
     cc_check '' -fno-zero-initialized-in-bss && CFLAGS="$CFLAGS -fno-zero-initialized-in-bss"
 fi
 
-if cc_check "stdio.h" "" "fseeko(stdin,0,0);" ; then
+if cc_check "stdio.h" "-D_LARGEFILE_SOURCE=1 -D_FILE_OFFSET_BITS=64" "fseeko(stdin,0,0);" ; then
     define fseek fseeko
     define ftell ftello
 elif cc_check "stdio.h" "" "fseeko64(stdin,0,0);" ; then
