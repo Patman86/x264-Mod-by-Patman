@@ -1,7 +1,7 @@
 /*****************************************************************************
  * cpu.c: cpu detection
  *****************************************************************************
- * Copyright (C) 2003-2024 x264 project
+ * Copyright (C) 2003-2025 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -33,7 +33,7 @@
 #if HAVE_SYSCONF
 #include <unistd.h>
 #endif
-#if SYS_LINUX && !defined(__ANDROID__)
+#if SYS_LINUX
 #include <sched.h>
 #endif
 #if SYS_BEOS
@@ -459,8 +459,8 @@ uint32_t x264_cpu_detect( void )
 
 #if defined(__linux__) || HAVE_ELF_AUX_INFO
 
-#define HWCAP_AARCH64_SVE   (1 << 22)
-#define HWCAP2_AARCH64_SVE2 (1 << 1)
+#define HWCAP_AARCH64_SVE   (1U << 22)
+#define HWCAP2_AARCH64_SVE2 (1U << 1)
 
 static uint32_t detect_flags( void )
 {
@@ -567,10 +567,6 @@ int x264_cpu_num_processors( void )
     return x264_pthread_num_processors_np();
 
 #elif SYS_LINUX
-#ifdef __ANDROID__
-    // Android NDK does not expose sched_getaffinity
-    return sysconf( _SC_NPROCESSORS_CONF );
-#else
     cpu_set_t p_aff;
     memset( &p_aff, 0, sizeof(p_aff) );
     if( sched_getaffinity( 0, sizeof(p_aff), &p_aff ) )
@@ -583,7 +579,6 @@ int x264_cpu_num_processors( void )
         np += (((uint8_t *)&p_aff)[bit / 8] >> (bit % 8)) & 1;
     return np;
 #endif
-#endif
 
 #elif SYS_BEOS
     system_info info;
@@ -593,7 +588,7 @@ int x264_cpu_num_processors( void )
 #elif SYS_MACOSX
     int ncpu;
     size_t length = sizeof( ncpu );
-    if( sysctlbyname("hw.ncpu", &ncpu, &length, NULL, 0) )
+    if( sysctlbyname("hw.logicalcpu", &ncpu, &length, NULL, 0) )
     {
         ncpu = 1;
     }
