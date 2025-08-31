@@ -194,6 +194,25 @@ endif
 OBJCHK += tools/checkasm-aarch64.o
 endif
 
+# RISCV64 RVV optims
+ifeq ($(SYS_ARCH),RISCV64)
+ifneq ($(findstring HAVE_RVV 1, $(CONFIG)),)
+SRCASM_X =
+
+SRCS_X  +=
+
+OBJASM +=
+ifneq ($(findstring HAVE_BITDEPTH8 1, $(CONFIG)),)
+OBJASM += $(SRCASM_X:%.S=%-8.o)
+endif
+ifneq ($(findstring HAVE_BITDEPTH10 1, $(CONFIG)),)
+OBJASM += $(SRCASM_X:%.S=%-10.o)
+endif
+
+OBJCHK +=
+endif
+endif
+
 # MSA optims
 ifeq ($(SYS_ARCH),MIPS)
 ifneq ($(findstring HAVE_MSA 1, $(CONFIG)),)

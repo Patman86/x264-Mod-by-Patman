@@ -182,6 +182,9 @@ typedef struct x264_nal_t
 #define X264_CPU_DOTPROD         0x0000040U  /* AArch64 DotProd */
 #define X264_CPU_I8MM            0x0000080U  /* AArch64 I8MM */
 
+/* RISCV64 */
+#define X264_CPU_RVV             0x0000001U  /* RISCV64 RVV */
+
 /* MIPS */
 #define X264_CPU_MSA             0x0000001U  /* MIPS MSA */
 

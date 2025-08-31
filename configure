@@ -426,6 +426,7 @@ CONFIG_HAVE="MALLOC_H ALTIVEC ALTIVEC_H MMX ARMV6 ARMV6T2 NEON AARCH64 BEOSTHREA
              MSA LSX MMAP WINRT VSX ARM_INLINE_ASM STRTOK_R CLOCK_GETTIME BITDEPTH8 BITDEPTH10 ELF_AUX_INFO GETAUXVAL \
              SYSCONF SYNC_FETCH_AND_ADD \
              DOTPROD I8MM SVE SVE2 \
+             RISCV64 RVV \
              AS_ARCHEXT_DOTPROD_DIRECTIVE AS_ARCHEXT_I8MM_DIRECTIVE AS_ARCHEXT_SVE_DIRECTIVE AS_ARCHEXT_SVE2_DIRECTIVE"
 
 # parse options
@@ -885,6 +886,12 @@ case $host_cpu in
             AS="${AS-${CC}}"
         fi
         ;;
+    riscv64)
+        ARCH="RISCV64"
+        stack_alignment=16
+
+        AS="${AS-${CC}}"
+        ;;
     s390|s390x)
         ARCH="S390"
         ;;
@@ -1074,6 +1081,15 @@ if [ $asm = auto -a $ARCH = MIPS ] ; then
         echo "If you really want to run on such a CPU, configure with --disable-asm."
         exit 1
     fi
+fi
+
+if [ $asm = auto -a $ARCH = RISCV64 ] ; then
+    define HAVE_RISCV64
+    if cc_check '' '' '__asm__(".option arch, +v\n" "vsetvli t0, a0, e32, m1, ta, ma");' ; then
+        define HAVE_RVV
+    fi
+
+    ASFLAGS="$ASFLAGS -c"
 fi
 
 if [ $asm = auto -a $ARCH = LOONGARCH ] ; then
@@ -1750,7 +1766,7 @@ cat conftest.log >> config.log
 cat conftest.log
 
 [ "$SRCPATH" != "." ] && ln -sf ${SRCPATH}/Makefile ./Makefile
-mkdir -p common/{aarch64,arm,mips,ppc,x86,loongarch} encoder extras filters/video input output tools
+mkdir -p common/{aarch64,arm,mips,ppc,x86,loongarch,riscv64} encoder extras filters/video input output tools
 
 echo
 echo "You can run 'make' or 'make fprofiled' now."
