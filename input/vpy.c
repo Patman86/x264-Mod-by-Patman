@@ -29,9 +29,15 @@
 
 #ifdef _MSC_VER
 typedef intptr_t atomic_int;
+#ifdef _WIN64
 #define atomic_load(object) _InterlockedCompareExchange64(object, 0, 0)
 #define atomic_fetch_add(object, operand) _InterlockedExchangeAdd64(object, operand)
 #define atomic_fetch_sub(object, operand) _InterlockedExchangeAdd64(object, -(operand))
+#else
+#define atomic_load(object) _InterlockedCompareExchange(object, 0, 0)
+#define atomic_fetch_add(object, operand) _InterlockedExchangeAdd(object, operand)
+#define atomic_fetch_sub(object, operand) _InterlockedExchangeAdd(object, -(operand))
+#endif
 #else
 #include <stdatomic.h>
 #endif
@@ -68,6 +74,19 @@ for ( int i = h->async_start_frame; i < h->num_frames; i++ ) \
 } \
 if( h->async_frame_done_event ) \
     free( h->async_frame_done_event );
+#undef CLOSE_FRAMEDONE_EVENTS
+
+#define CLOSE_FRAMEDONE_EVENTS() \
+do { \
+    if (h->async_frame_done_event) { \
+        for (int i = h->async_start_frame; i < h->num_frames; i++) { \
+            if (h->async_frame_done_event[i]) \
+                CloseHandle(h->async_frame_done_event[i]); \
+        } \
+        free(h->async_frame_done_event); \
+        h->async_frame_done_event = NULL; \
+    } \
+} while(0)
 #else
 typedef char libp_t;
 #include <dlfcn.h>
@@ -174,7 +193,14 @@ static void VS_CC async_callback(void* user_data, const VSFrame* f, int n, VSNod
         x264_cli_log("vpy ", X264_LOG_ERROR, "async frame request #%d failed: %s\n", n, error_msg);
     }
     else
-        h->async_buffer[n] = f;
+    {
+        /* Keep a reference to the frame — filters often return temporary frames
+           that become invalid after the callback returns. */
+        if (h->vsapi && h->vsapi->addFrameRef)
+            h->async_buffer[n] = h->vsapi->addFrameRef(f);
+        else
+            h->async_buffer[n] = f; /* fallback, but shouldn't happen on API4 */
+    }
 
     atomic_fetch_sub(&h->async_pending, 1);
 #ifdef _WIN32
@@ -317,7 +343,10 @@ static int open_file(char* psz_filename, hnd_t* p_handle, video_info_t* info, cl
     h->async_requests = core_info.numThreads;
     h->async_buffer = (const VSFrame**)malloc(h->num_frames * sizeof(const VSFrame*));
 
-    CREATE_FRAMEDONE_EVENTS()
+    CREATE_FRAMEDONE_EVENTS();
+
+    /* ensure buffer is zeroed to avoid reading uninitialized pointers */
+    memset(h->async_buffer, 0, h->num_frames * sizeof(const VSFrame*));
 
     const int intital_request_size = min(h->async_requests, h->num_frames - h->async_start_frame);
     h->async_requested = h->async_start_frame + intital_request_size;
@@ -402,22 +431,28 @@ static int read_frame(cli_pic_t* pic, hnd_t handle, int i_frame)
         }
     }
 
+    const VSVideoFormat* fi = h->vsapi->getVideoFrameFormat(pic->opaque);
+
     for (int i = 0; i < pic->img.planes; i++)
     {
-        const VSVideoFormat* fi = h->vsapi->getVideoFrameFormat(pic->opaque);
         pic->img.stride[i] = h->vsapi->getStride(pic->opaque, planes[i]);
         pic->img.plane[i] = (uint8_t*)h->vsapi->getReadPtr(pic->opaque, planes[i]);
 
         if( h->uc_depth && h->bit_depth != h->desired_bit_depth )
         {
+            uint16_t *plane;
+            int height, pixel_count;
+            int lshift = 16 - h->bit_depth;
             /* Upconvert non 16-bit high depth planes to 16-bit
              * using the same algorithm as in the depth filter. */
-            uint16_t* plane = (uint16_t*)pic->img.plane[i];
-            int height = h->vsapi->getFrameHeight(pic->opaque, planes[i]);
-            int pixel_count = pic->img.stride[i] / fi->bytesPerSample * height;
-            int lshift = 16 - h->bit_depth;
-            for (uint64_t j = 0; j < pixel_count; j++)
-                plane[j] = plane[j] << lshift;
+            for (int i = 0; i < pic->img.planes; i++)
+            {
+                plane = (uint16_t *)pic->img.plane[i];
+                height = h->vsapi->getFrameHeight(pic->opaque, planes[i]);
+                pixel_count = pic->img.stride[i] / fi->bytesPerSample * height;
+                for (int64_t j = 0; j < pixel_count; j++)
+                    plane[j] = plane[j] << lshift;
+            }
         }
     }
 
@@ -437,7 +472,7 @@ static int read_frame(cli_pic_t* pic, hnd_t handle, int i_frame)
 
     h->vsapi->freeFrame(pic->opaque);
     h->async_buffer[i_frame] = NULL;
-    h->async_consumed++;
+    atomic_fetch_add(&h->async_consumed, 1);
 
     return 0;
 }
@@ -473,13 +508,16 @@ static int close_file(hnd_t handle)
     for (int i = h->async_consumed; i < h->async_requested; i++)
     {
         if (h->async_buffer[i] != NULL)
+        {
             h->vsapi->freeFrame(h->async_buffer[i]);
+            h->async_buffer[i] = NULL;
+        }
     }
 
     if (h->async_buffer)
         free(h->async_buffer);
 
-    CLOSE_FRAMEDONE_EVENTS()
+    CLOSE_FRAMEDONE_EVENTS();
 
     h->vsapi->freeNode(h->node);
     h->vssapi->freeScript(h->script);
