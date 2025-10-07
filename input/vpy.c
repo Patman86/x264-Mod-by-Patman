@@ -66,16 +66,6 @@ for (int i = h->async_start_frame; i < h->num_frames; i++) \
         FAIL_IF_ERROR( 1, "failed to create async event for frame %d\n", i ); \
 }
 #define WAIT_FOR_COMPETED_FRAME(frame) WaitForSingleObject( h->async_frame_done_event[frame], INFINITE );
-#define CLOSE_FRAMEDONE_EVENTS()\
-for ( int i = h->async_start_frame; i < h->num_frames; i++ ) \
-{ \
-    if ( h->async_frame_done_event[i] ) \
-        CloseHandle( h->async_frame_done_event[i] ); \
-} \
-if( h->async_frame_done_event ) \
-    free( h->async_frame_done_event );
-#undef CLOSE_FRAMEDONE_EVENTS
-
 #define CLOSE_FRAMEDONE_EVENTS() \
 do { \
     if (h->async_frame_done_event) { \
