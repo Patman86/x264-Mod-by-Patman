@@ -102,6 +102,8 @@ while(h->async_buffer[frame] == NULL) \
 #define CLOSE_FRAMEDONE_EVENTS()
 #endif
 
+#define MAX_ASYNC_FRAMES 32
+
 #define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "vpy ", __VA_ARGS__ )
 
 typedef const VSSCRIPTAPI* (VS_CC* type_getVSScriptAPI)(int version);
@@ -181,16 +183,24 @@ static void VS_CC async_callback(void* user_data, const VSFrame* f, int n, VSNod
     {
         h->async_failed_frame = n;
         x264_cli_log("vpy ", X264_LOG_ERROR, "async frame request #%d failed: %s\n", n, error_msg);
+        return;
     }
-    else
+
+    int buf_index = n % MAX_ASYNC_FRAMES;
+    if (h->async_buffer[buf_index])
     {
-        /* Keep a reference to the frame — filters often return temporary frames
-           that become invalid after the callback returns. */
-        if (h->vsapi && h->vsapi->addFrameRef)
-            h->async_buffer[n] = h->vsapi->addFrameRef(f);
-        else
-            h->async_buffer[n] = f; /* fallback, but shouldn't happen on API4 */
+        x264_cli_log("vpy ", X264_LOG_DEBUG, "freeing old frame at buffer index %d\n", n);
+        h->vsapi->freeFrame(h->async_buffer[buf_index]);
+        h->async_buffer[buf_index] = NULL;
     }
+
+    if (h->vsapi && h->vsapi->addFrameRef)
+    {
+        h->vsapi->addFrameRef((VSFrame*)f);
+        x264_cli_log("vpy ", X264_LOG_DEBUG, "added frame ref at buffer index %d\n", n);
+    }
+
+    h->async_buffer[buf_index] = f; /* fallback, but shouldn't happen on API4 */
 
     atomic_fetch_sub(&h->async_pending, 1);
 #ifdef _WIN32
@@ -399,21 +409,19 @@ static int read_frame(cli_pic_t* pic, hnd_t handle, int i_frame)
     static const int planes[3] = { 0, 1, 2 };
     VapourSynthContext* h = handle;
 
-    if (i_frame >= h->num_frames)
+    if (i_frame >= h->num_frames || h->async_failed_frame >= i_frame)
         return -1;
 
-    if (h->async_failed_frame >= i_frame)
-        return -1;
-
+    int slot = i_frame % MAX_ASYNC_FRAMES;
     WAIT_FOR_COMPETED_FRAME(i_frame)
-        if (!h->async_buffer[i_frame])
+        if (!h->async_buffer[slot])
             return -1;
-    pic->opaque = (VSFrame*)h->async_buffer[i_frame];
+    pic->opaque = (VSFrame*)h->async_buffer[slot];
 
     /* Prefetch subsequent frames. */
     if (h->async_requested < h->num_frames)
     {
-        while (h->async_requests >= (h->async_requested - h->async_consumed) && h->async_failed_frame < 0)
+        while ((h->async_requested - h->async_consumed) < MAX_ASYNC_FRAMES && h->async_requested < h->num_frames && h->async_failed_frame < 0)
         {
             h->vsapi->getFrameAsync(h->async_requested, h->node, async_callback, h);
             h->async_requested++;
@@ -430,19 +438,14 @@ static int read_frame(cli_pic_t* pic, hnd_t handle, int i_frame)
 
         if( h->uc_depth && h->bit_depth != h->desired_bit_depth )
         {
-            uint16_t *plane;
-            int height, pixel_count;
-            int lshift = 16 - h->bit_depth;
             /* Upconvert non 16-bit high depth planes to 16-bit
              * using the same algorithm as in the depth filter. */
-            for (int i = 0; i < pic->img.planes; i++)
-            {
-                plane = (uint16_t *)pic->img.plane[i];
-                height = h->vsapi->getFrameHeight(pic->opaque, planes[i]);
-                pixel_count = pic->img.stride[i] / fi->bytesPerSample * height;
+                uint16_t *plane = (uint16_t *)pic->img.plane[i];
+                int height = h->vsapi->getFrameHeight(pic->opaque, planes[i]);
+                int pixel_count = pic->img.stride[i] / fi->bytesPerSample * height;
+                int lshift = 16 - h->bit_depth;
                 for (int64_t j = 0; j < pixel_count; j++)
                     plane[j] = plane[j] << lshift;
-            }
         }
     }
 
@@ -495,9 +498,9 @@ static int close_file(hnd_t handle)
 
     /* Release not consumed frames. Needed in case of early interruption
        or when --frames option is less than actual script's frame count. */
-    for (int i = h->async_consumed; i < h->async_requested; i++)
+    for (int i = 0; i < MAX_ASYNC_FRAMES; i++)
     {
-        if (h->async_buffer[i] != NULL)
+        if (h->async_buffer[i])
         {
             h->vsapi->freeFrame(h->async_buffer[i]);
             h->async_buffer[i] = NULL;
@@ -505,7 +508,10 @@ static int close_file(hnd_t handle)
     }
 
     if (h->async_buffer)
+    {
         free(h->async_buffer);
+        h->async_buffer = NULL;
+    }
 
     CLOSE_FRAMEDONE_EVENTS();
 
