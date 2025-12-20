@@ -99,6 +99,8 @@ const x264_cpu_name_t x264_cpu_names[] =
     {"I8MM",            X264_CPU_I8MM},
     {"SVE",             X264_CPU_SVE},
     {"SVE2",            X264_CPU_SVE2},
+#elif ARCH_RISCV64
+    {"RVV",             X264_CPU_RVV},
 #elif ARCH_MIPS
     {"MSA",             X264_CPU_MSA},
 #elif ARCH_LOONGARCH
@@ -456,6 +458,28 @@ uint32_t x264_cpu_detect( void )
     flags |= x264_cpu_fast_neon_mrc_test() ? X264_CPU_FAST_NEON_MRC : 0;
 #endif
     // TODO: write dual issue test? currently it's A8 (dual issue) vs. A9 (fast mrc)
+    return flags;
+}
+
+#elif HAVE_RISCV64
+
+#define HWCAP_RISCV64_RVV     (1 << ('V' - 'A'))
+
+uint32_t x264_cpu_detect( void )
+{
+    uint32_t flags = 0;
+
+#if HAVE_GETAUXVAL || HAVE_ELF_AUX_INFO
+    unsigned long hwcap = x264_getauxval( AT_HWCAP );
+
+    if ( hwcap & HWCAP_RISCV64_RVV )
+        flags |= X264_CPU_RVV;
+#else
+#if HAVE_RVV
+    flags |= X264_CPU_RVV;
+#endif
+#endif
+
     return flags;
 }
 
