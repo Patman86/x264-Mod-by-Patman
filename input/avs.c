@@ -39,14 +39,6 @@ typedef char libp_t;
 #define avs_address dlsym
 #endif
 
-/* Additional standard includes used in the adapted code */
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <limits.h>
-#include <stdio.h>
-
 #define AVSC_NO_DECLSPEC
 #undef EXTERN_C
 #include "extras/avisynth_c.h"
@@ -91,9 +83,6 @@ typedef struct
     int uc_depth;
     int cmp_size;
     int desired_bit_depth;
-    /* persistent, reusable packed frame buffer for efficient copying */
-    uint8_t *frame_buffer;
-    size_t frame_buffer_size;
     struct
     {
         AVSC_DECLARE_FUNC( avs_clip_get_error );
@@ -124,10 +113,6 @@ typedef struct
         AVSC_DECLARE_FUNC( avs_get_height_p );
         AVSC_DECLARE_FUNC( avs_get_pitch_p );
         AVSC_DECLARE_FUNC( avs_get_read_ptr_p );
-        /* optional: row-size function (not present in some older C-APIs) */
-        AVSC_DECLARE_FUNC( avs_get_row_size_p );
-        /* optional: bit blit */
-        AVSC_DECLARE_FUNC( avs_bit_blt );
     } func;
 } avs_hnd_t;
 
@@ -196,9 +181,6 @@ static int custom_avs_load_library( avs_hnd_t *h, cli_input_opt_t *opt )
     LOAD_AVS_FUNC( avs_get_height_p, 1 );
     LOAD_AVS_FUNC( avs_get_pitch_p, 1 );
     LOAD_AVS_FUNC( avs_get_read_ptr_p, 1 );
-    LOAD_AVS_FUNC( avs_get_row_size_p, 1 );
-    /* try to load avs_bit_blt if available (AviSynth/AviSynth+ extension) */
-    LOAD_AVS_FUNC( avs_bit_blt, 1 );
     return 0;
 fail:
     avs_close( h->library );
@@ -220,8 +202,6 @@ fail:
 #define AVS_IS_Y( vi ) (h->func.avs_is_y ? h->func.avs_is_y( vi ) : AVS_IS_Y8( vi ))
 #define AVS_GET_PITCH_P( p, plane ) (h->func.avs_get_pitch_p ? h->func.avs_get_pitch_p( p, plane ) : avs_get_pitch_p( p, plane ))
 #define AVS_GET_READ_PTR_P( p, plane ) (h->func.avs_get_read_ptr_p ? h->func.avs_get_read_ptr_p( p, plane ) : avs_get_read_ptr_p( p, plane ))
-/* optional row size helper: if not present, fall back to pitch (safe fallback) */
-#define AVS_GET_ROW_SIZE_P( p, plane ) (h->func.avs_get_row_size_p ? h->func.avs_get_row_size_p( p, plane ) : AVS_GET_PITCH_P( p, plane ))
 /* No need in separated bitdepth detection on Avs+ side, we'll just shift lesser depths later using y4m workaround */
 #define AVS_IS_YUV420_HBD(vi) (h->func.avs_is_420 && h->func.avs_is_420(vi) && (h->func.avs_bits_per_component(vi) > 8 && h->func.avs_bits_per_component(vi) <= 16))
 #define AVS_IS_YUV422_HBD(vi) (h->func.avs_is_422 && h->func.avs_is_422(vi) && (h->func.avs_bits_per_component(vi) > 8 && h->func.avs_bits_per_component(vi) <= 16))
@@ -328,13 +308,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     avs_hnd_t *h = calloc( 1, sizeof(avs_hnd_t) );
     if( !h )
         return -1;
-    h->frame_buffer = NULL;
-    h->frame_buffer_size = 0;
-    if( custom_avs_load_library( h, opt ) )
-    {
-        free(h);
-        return -1;
-    }
+    FAIL_IF_ERROR( custom_avs_load_library( h, opt ), "failed to load avisynth\n" );
     h->env = h->func.avs_create_script_environment( AVS_INTERFACE_25 );
     if( h->func.avs_get_error )
     {
@@ -626,105 +600,32 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
     avs_hnd_t *h = handle;
     if( i_frame >= h->num_frames )
         return -1;
-
-    AVS_VideoFrame *frm = h->func.avs_get_frame( h->clip, i_frame );
+    AVS_VideoFrame *frm = pic->opaque = h->func.avs_get_frame( h->clip, i_frame );
     const char *err = h->func.avs_clip_get_error( h->clip );
     FAIL_IF_ERROR( err, "%s occurred while reading frame %d\n", err, i_frame );
-
-    int plane_count = pic->img.planes;
-    const int *plane_ids = planes;
-
-    /* compute required packed buffer size safely */
-    size_t total_size = 0;
-    for( int i = 0; i < plane_count; i++ )
+    for( int i = 0; i < pic->img.planes; i++ )
     {
-        int rowsize = AVS_GET_ROW_SIZE_P( frm, plane_ids[i] );
-        int planeheight = h->func.avs_get_height_p( frm, plane_ids[i] );
-
-        if (rowsize < 0 || planeheight < 0)
+        pic->img.plane[i] = (uint8_t*)AVS_GET_READ_PTR_P( frm, planes[i] );
+        pic->img.stride[i] = AVS_GET_PITCH_P( frm, planes[i] );
+        if (h->uc_depth && h->bit_depth != h->desired_bit_depth )
         {
-            h->func.avs_release_video_frame( frm );
-            return -1;
+            /* upconvert non 16bit high depth planes to 16bit using the same
+             * algorithm as used in the depth filter. */
+            uint16_t * plane = (uint16_t*)pic->img.plane[i];
+            int plane_height = h->func.avs_get_height_p( frm, planes[i] );
+            uint64_t pixel_count = pic->img.stride[i] / h->cmp_size * plane_height;
+            int lshift = 16 - h->bit_depth;
+            for ( uint64_t j = 0; j < pixel_count; j++ )
+                 plane[j] = plane[j] << lshift;
         }
-
-        /* overflow guard */
-        if (planeheight && (size_t)rowsize > SIZE_MAX / (size_t)planeheight)
-        {
-            h->func.avs_release_video_frame( frm );
-            return -1;
-        }
-
-        total_size += (size_t)rowsize * (size_t)planeheight;
     }
-
-    /* allocate or reuse persistent frame buffer */
-    if (!h->frame_buffer || h->frame_buffer_size < total_size)
-    {
-        uint8_t *nbuf = realloc(h->frame_buffer, total_size);
-        if (!nbuf)
-        {
-            h->func.avs_release_video_frame( frm );
-            return -1;
-        }
-        h->frame_buffer = nbuf;
-        h->frame_buffer_size = total_size;
-    }
-
-    uint8_t *dst = h->frame_buffer;
-
-    for (int i = 0; i < plane_count; i++)
-    {
-        int plane = plane_ids[i];
-        int src_pitch = AVS_GET_PITCH_P( frm, plane );
-        int rowsize = AVS_GET_ROW_SIZE_P( frm, plane );
-        int planeheight = h->func.avs_get_height_p( frm, plane );
-        const uint8_t *srcp = (const uint8_t*)AVS_GET_READ_PTR_P( frm, plane );
-
-        pic->img.plane[i] = dst;
-        pic->img.stride[i] = rowsize;  /* set packed output stride */
-
-        /* copy plane rows into packed buffer (use avs_bit_blt if available) */
-        if (h->func.avs_bit_blt)
-        {
-            /* avs_bit_blt signature in C API may differ; try to call via function pointer */
-            /* Typical parameters: env, dst, dst_stride, src, src_stride, rowsize, height */
-            h->func.avs_bit_blt( h->env, dst, rowsize, srcp, src_pitch, rowsize, planeheight );
-        }
-        else
-        {
-            for (int y = 0; y < planeheight; y++)
-                memcpy(dst + (size_t)y * rowsize, srcp + (size_t)y * src_pitch, rowsize);
-        }
-
-        /* upconvert lesser depths to 16-bit inside packed buffer if required */
-        if (h->uc_depth && h->bit_depth != h->desired_bit_depth)
-        {
-            uint16_t *pdata = (uint16_t*)dst;
-            size_t pixels = (size_t)rowsize / (size_t)h->cmp_size * (size_t)planeheight;
-            int shift = 16 - h->bit_depth;
-            for (size_t j = 0; j < pixels; j++)
-                pdata[j] <<= shift;
-        }
-
-        dst += (size_t)rowsize * (size_t)planeheight;
-    }
-
-    /* release avisynth frame immediately; our packed buffer now owns the data */
-    h->func.avs_release_video_frame( frm );
-
-    /* store pointer in pic->opaque (note: buffer ownership is in handle) */
-    pic->opaque = h->frame_buffer;
-
     return 0;
 }
 
 static int release_frame( cli_pic_t *pic, hnd_t handle )
 {
-    /* In the updated model, pic->opaque points into h->frame_buffer.
-     * The handle owns the persistent buffer and will free it at close_file.
-     * We simply clear pic->opaque so higher layers don't attempt to use it. */
-    if (pic)
-        pic->opaque = NULL;
+    avs_hnd_t *h = handle;
+    h->func.avs_release_video_frame( pic->opaque );
     return 0;
 }
 
@@ -742,9 +643,6 @@ static int close_file( hnd_t handle )
         h->func.avs_delete_script_environment( h->env );
     if( h->library )
         avs_close( h->library );
-    /* free persistent frame buffer if any */
-    if( h->frame_buffer )
-        free( h->frame_buffer );
     free( h );
     return 0;
 }
