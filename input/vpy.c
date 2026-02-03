@@ -398,19 +398,23 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
 
     for( int i = 0; i < pic->img.planes; i++ )
     {
-        pic->img.stride[i] = h->vsapi->getStride( pic->opaque, planes[i] );
         pic->img.plane[i] = (uint8_t*)h->vsapi->getReadPtr( pic->opaque, planes[i] );
+        pic->img.stride[i] = h->vsapi->getStride( pic->opaque, planes[i] );
 
         if( h->uc_depth && h->bit_depth != h->desired_bit_depth )
         {
             /* Upconvert non 16-bit high depth planes to 16-bit
              * using the same algorithm as in the depth filter. */
             uint16_t *plane = (uint16_t*)pic->img.plane[i];
-            int height = h->vsapi->getFrameHeight( pic->opaque, planes[i] );
-            int pixel_count = pic->img.stride[i] / fi->bytesPerSample * height;
+            int plane_height = h->vsapi->getFrameHeight( pic->opaque, planes[i] );
+            int row_pixels = pic->img.stride[i] / fi->bytesPerSample;
             int lshift = 16 - h->bit_depth;
-            for( uint64_t j = 0; j < pixel_count; j++ )
-                plane[j] = plane[j] << lshift;
+            for( int y = 0; y < plane_height; y++ )
+            {
+                uint16_t *row = plane + (size_t)y * row_pixels;
+                for( int j = 0; j < row_pixels; j++ )
+                    row[j] <<= lshift;
+            }
         }
     }
 

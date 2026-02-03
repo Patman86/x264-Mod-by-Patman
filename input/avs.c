@@ -499,7 +499,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
                                           "input_depth", "input_mode",
                                           "output_depth", "output_mode" };
         AVS_Value res2 = h->func.avs_invoke( h->env, "f3kdb", avs_new_value_array( arg_arr, 10 ), arg_name );
-        x264_cli_log( "avs", X264_LOG_WARNING, "performing bit depth conversion using f3kdb: %d->%d\n", opt->bit_depth, opt->desired_bit_depth );
+        x264_cli_log( "avs ", X264_LOG_WARNING, "performing bit depth conversion using f3kdb: %d->%d\n", opt->bit_depth, opt->desired_bit_depth );
         FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert bit depth: %s\n", avs_as_error( res2 ) );
         res = update_clip( h, &vi, res2, res );
         // notification that the input bit depth has changed to the desired one
@@ -607,16 +607,21 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
     {
         pic->img.plane[i] = (uint8_t*)AVS_GET_READ_PTR_P( frm, planes[i] );
         pic->img.stride[i] = AVS_GET_PITCH_P( frm, planes[i] );
+
         if (h->uc_depth && h->bit_depth != h->desired_bit_depth )
         {
             /* upconvert non 16bit high depth planes to 16bit using the same
              * algorithm as used in the depth filter. */
             uint16_t * plane = (uint16_t*)pic->img.plane[i];
             int plane_height = h->func.avs_get_height_p( frm, planes[i] );
-            uint64_t pixel_count = pic->img.stride[i] / h->cmp_size * plane_height;
+            int row_pixels = pic->img.stride[i] / h->cmp_size;
             int lshift = 16 - h->bit_depth;
-            for ( uint64_t j = 0; j < pixel_count; j++ )
-                 plane[j] = plane[j] << lshift;
+            for( int y = 0; y < plane_height; y++ )
+            {
+                uint16_t *row = plane + (size_t)y * row_pixels;
+                for( int j = 0; j < row_pixels; j++ )
+                    row[j] <<= lshift;
+            }
         }
     }
     return 0;
