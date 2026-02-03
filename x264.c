@@ -2063,59 +2063,145 @@ static int encode_frame( x264_t *h, hnd_t hout, x264_picture_t *pic, int64_t *la
     return i_frame_size;
 }
 
-static int64_t print_status( int64_t i_start, int64_t i_previous, int i_frame, int i_frame_total, int64_t i_file, x264_param_t *param, int64_t last_ts )
+static void seconds_to_hms( int sec, int *hh, int *mm, int *ss )
 {
-    char buf[200];
-    int64_t i_time = x264_mdate();
-    if( i_previous && i_time - i_previous < UPDATE_INTERVAL )
-        return i_previous;
-    int64_t i_elapsed = i_time - i_start;
-    double fps = i_elapsed > 0 ? i_frame * 1000000. / i_elapsed : 0;
-    double bitrate;
-    if( last_ts )
-        bitrate = (double) i_file * 8 / ( (double) last_ts * 1000 * param->i_timebase_num / param->i_timebase_den );
-    else
-        bitrate = (double) i_file * 8 / ( (double) 1000 * param->i_fps_den / param->i_fps_num );
-    int ete, ete_hh, ete_mm, ete_ss, eta, eta_hh, eta_mm, eta_ss, fps_prec, bitrate_prec, file_prec, estsz_prec;
-    double percentage, estsz, file_num, estsz_num;
-    char* file_unit, * estsz_unit;
-    fps_prec = fps > 999.5 ? 0 : fps > 99.5 ? 1 : fps > 9.95 ? 2 : 3;
-    bitrate_prec = bitrate > 9999.5 ? 0 : bitrate > 999.5 ? 1 : 2;
-    file_prec = i_file < 1000000000 ? 2 : i_file < 10000000000 ? 1 : 0;
-    file_num = i_file < 1000000 ? (double)i_file / 1000. : (double)i_file / 1000000.;
-    file_unit = i_file < 1000000 ? "K" : "M";
-    if( i_frame_total )
+    if( sec < 0 )
+        sec = 0;
+    *hh = sec / 3600;
+    *mm = (sec / 60) % 60;
+    *ss = sec % 60;
+}
+
+static int precision_for_fps( double fps )
+{
+    return fps > 999.5 ? 0 :
+           fps >  99.5 ? 1 :
+           fps >   9.95 ? 2 : 3;
+}
+
+static int precision_for_bitrate( double kbps )
+{
+    return kbps > 9999.5 ? 0 :
+           kbps >  999.5 ? 1 : 2;
+}
+
+static void formatSizeKBMBGB( double bytes, double *num, const char **unit, int *prec )
+{
+    const double KB = 1024.0;
+    const double MB = 1024.0 * KB;
+    const double GB = 1024.0 * MB;
+
+    if( bytes >= GB )
     {
-        ete = i_elapsed / 1000000;
-        eta = i_elapsed * (i_frame_total - i_frame) / ((int64_t)i_frame * 1000000);
-        percentage = 100. * i_frame / i_frame_total;
-        ete_hh = ete / 3600;
-        ete_mm = (ete / 60) % 60;
-        ete_ss = ete % 60;
-        eta_hh = eta / 3600;
-        eta_mm = (eta / 60) % 60;
-        eta_ss = eta % 60;
-        estsz = (double)i_file * i_frame_total / (i_frame * 1000.);
-        estsz_prec = estsz < 1000000 ? 2 : estsz < 10000000 ? 1 : 0;
-        estsz_num = estsz < 1000 ? estsz : estsz / 1000;
-        estsz_unit = estsz < 1000 ? "K" : "M";
-        sprintf(buf, "x264 [%.1f%%] %d/%d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
-                percentage, i_frame, i_frame_total, fps_prec, fps, bitrate_prec, bitrate,
-                ete_hh, ete_mm, ete_ss,
-                eta_hh, eta_mm, eta_ss,
-                file_prec, file_num, file_unit,
-                estsz_prec, estsz_num, estsz_unit);
+        *num  = bytes / GB;
+        *unit = "G";
+    }
+    else if( bytes >= MB )
+    {
+        *num  = bytes / MB;
+        *unit = "M";
     }
     else
-        sprintf(buf, "x264 %d Frames @ %.*f FPS | %.*f kb/s | %d:%02d:%02d | %.*f %sB",
-                i_frame, fps_prec, fps, bitrate_prec, bitrate,
-                ete_hh, ete_mm, ete_ss,
-                file_prec, file_num, file_unit);
-    fprintf( stderr, "%s  \r", buf+5 );
-    x264_cli_set_console_title( buf );
-    fflush( stderr ); // needed in windows
-    return i_time;
+    {
+        *num  = bytes / KB;
+        *unit = "K";
+    }
+
+    if( *num >= 1000.0 )
+        *prec = 0;
+    else if( *num >= 100.0 )
+        *prec = 1;
+    else
+        *prec = 2;
 }
+
+static void format_current_and_est_size( double totalBytes, int framesDone, int framesTotal, double *curNum, const char **curUnit, int *curPrec, double *estNum, const char **estUnit, int *estPrec )
+{
+    formatSizeKBMBGB( totalBytes, curNum, curUnit, curPrec );
+
+    if( framesDone > 0 && framesTotal > 0 )
+    {
+        double estBytes = totalBytes * (double)framesTotal / (double)framesDone;
+        formatSizeKBMBGB( estBytes, estNum, estUnit, estPrec );
+    }
+    else
+    {
+        *estNum  = 0.0;
+        *estUnit = "K";
+        *estPrec = 2;
+    }
+}
+
+static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i_frame_total, int64_t i_file, x264_param_t *param, int64_t ticks )
+{
+    int64_t now = x264_mdate();
+    if( now - i_last < 500000 )
+        return i_last;
+
+    int64_t elapsed_us = now - i_start;
+    double elapsed_s   = (double)elapsed_us / 1000000.0;
+    double fps         = elapsed_s > 0.0 ? (double)i_frame / elapsed_s : 0.0;
+
+    double seconds = elapsed_s;
+    double bitrateKbps = seconds > 0.0
+        ? ((double)i_file * 8.0 / 1000.0) / seconds
+        : 0.0;
+
+    int fps_prec     = precision_for_fps( fps );
+    int bitrate_prec = precision_for_bitrate( bitrateKbps );
+
+    double file_num = 0.0, estsz_num = 0.0;
+    const char *file_unit = "", *estsz_unit = "";
+    int file_prec = 0, estsz_prec = 0;
+
+    format_current_and_est_size( (double)i_file,
+                                 i_frame, i_frame_total,
+                                 &file_num, &file_unit, &file_prec,
+                                 &estsz_num, &estsz_unit, &estsz_prec );
+
+    char buf[200];
+
+    if( i_frame_total > 0 )
+    {
+        int ete_sec = (int)elapsed_s;
+        int eta_sec = 0;
+
+        if( i_frame > 1 && fps > 0.0 )
+            eta_sec = (int)(((double)i_frame_total - (double)i_frame) / fps);
+
+        double percentage = 100.0 * (double)i_frame / (double)i_frame_total;
+
+        int ete_hh, ete_mm, ete_ss;
+        int eta_hh, eta_mm, eta_ss;
+        seconds_to_hms( ete_sec, &ete_hh, &ete_mm, &ete_ss );
+        seconds_to_hms( eta_sec, &eta_hh, &eta_mm, &eta_ss );
+
+        snprintf( buf, sizeof(buf), "x264 [%.1f%%] %d/%d frames @ %.*f fps | %.*f kb/s | "
+                       "%d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
+                       percentage,
+                       i_frame, i_frame_total,
+                       fps_prec, fps,
+                       bitrate_prec, bitrateKbps,
+                       ete_hh, ete_mm, ete_ss,
+                       eta_hh, eta_mm, eta_ss,
+                       file_prec, file_num, file_unit,
+                       estsz_prec, estsz_num, estsz_unit );
+    }
+    else
+    {
+        snprintf( buf, sizeof(buf), "x264 %d frames @ %.*f fps | %.*f kb/s | %.*f %sB",
+                       i_frame,
+                       fps_prec, fps,
+                       bitrate_prec, bitrateKbps,
+                       file_prec, file_num, file_unit );
+    }
+
+    fprintf( stderr, "%s\r", buf );
+    fflush( stderr );
+
+    return now;
+}
+
 
 static void convert_cli_to_lib_pic( x264_picture_t *lib, cli_pic_t *cli )
 {
