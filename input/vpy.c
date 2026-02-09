@@ -594,4 +594,4 @@ static int close_file(hnd_t handle)
  * x264 CLI input descriptor
  * ------------------------------------------------------------------------ */
 
-const cli_input_t vpy_input = {open_file,.picture_alloc, read_frame, release_frame, picture_clean, close_file};
+const cli_input_t vpy_input = {open_file, picture_alloc, read_frame, release_frame, picture_clean, close_file};
