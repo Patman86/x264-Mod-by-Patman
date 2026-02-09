@@ -2085,18 +2085,12 @@ static int precision_for_bitrate( double kbps )
            kbps >  999.5 ? 1 : 2;
 }
 
-static void formatSizeKBMBGB( double bytes, double *num, const char **unit, int *prec )
+static void formatSizeKBMB( double bytes, double *num, const char **unit, int *prec )
 {
-    const double KB = 1024.0;
-    const double MB = 1024.0 * KB;
-    const double GB = 1024.0 * MB;
+    const double KB = 1000.0;
+    const double MB = 1000.0 * KB;
 
-    if( bytes >= GB )
-    {
-        *num  = bytes / GB;
-        *unit = "G";
-    }
-    else if( bytes >= MB )
+    if( bytes >= MB )
     {
         *num  = bytes / MB;
         *unit = "M";
@@ -2117,12 +2111,12 @@ static void formatSizeKBMBGB( double bytes, double *num, const char **unit, int 
 
 static void format_current_and_est_size( double totalBytes, int framesDone, int framesTotal, double *curNum, const char **curUnit, int *curPrec, double *estNum, const char **estUnit, int *estPrec )
 {
-    formatSizeKBMBGB( totalBytes, curNum, curUnit, curPrec );
+    formatSizeKBMB( totalBytes, curNum, curUnit, curPrec );
 
     if( framesDone > 0 && framesTotal > 0 )
     {
         double estBytes = totalBytes * (double)framesTotal / (double)framesDone;
-        formatSizeKBMBGB( estBytes, estNum, estUnit, estPrec );
+        formatSizeKBMB( estBytes, estNum, estUnit, estPrec );
     }
     else
     {
@@ -2143,9 +2137,7 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
     double fps         = elapsed_s > 0.0 ? (double)i_frame / elapsed_s : 0.0;
 
     double seconds = elapsed_s;
-    double bitrateKbps = seconds > 0.0
-        ? ((double)i_file * 8.0 / 1000.0) / seconds
-        : 0.0;
+    double bitrateKbps = seconds > 0.0 ? ((double)i_file * 8.0 / 1000.0) / seconds : 0.0;
 
     int fps_prec     = precision_for_fps( fps );
     int bitrate_prec = precision_for_bitrate( bitrateKbps );
@@ -2154,10 +2146,7 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
     const char *file_unit = "", *estsz_unit = "";
     int file_prec = 0, estsz_prec = 0;
 
-    format_current_and_est_size( (double)i_file,
-                                 i_frame, i_frame_total,
-                                 &file_num, &file_unit, &file_prec,
-                                 &estsz_num, &estsz_unit, &estsz_prec );
+    format_current_and_est_size( (double)i_file, i_frame, i_frame_total, &file_num, &file_unit, &file_prec, &estsz_num, &estsz_unit, &estsz_prec );
 
     char buf[200];
 
@@ -2176,8 +2165,7 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
         seconds_to_hms( ete_sec, &ete_hh, &ete_mm, &ete_ss );
         seconds_to_hms( eta_sec, &eta_hh, &eta_mm, &eta_ss );
 
-        snprintf( buf, sizeof(buf), "x264 [%.1f%%] %d/%d frames @ %.*f fps | %.*f kb/s | "
-                       "%d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
+        snprintf( buf, sizeof(buf), "x264 [%.1f%%] %d/%d frames @ %.*f fps | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
                        percentage,
                        i_frame, i_frame_total,
                        fps_prec, fps,
