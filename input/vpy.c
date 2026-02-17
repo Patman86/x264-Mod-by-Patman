@@ -455,9 +455,8 @@ static int read_frame(cli_pic_t *pic, hnd_t handle, int i_frame)
     /* Prefetch more frames while keeping a bounded number in-flight */
     if (h->requestedFrames < h->framesToRequest && h->async_failed_frame < 0)
     {
-        const int max_prefetch = h->parallelRequests * 4; /* soft upper bound */
 
-        while (h->requestedFrames < h->framesToRequest && (h->requestedFrames - h->completedFrames) < max_prefetch && h->async_failed_frame < 0)
+        while (h->requestedFrames < h->framesToRequest && (h->requestedFrames - h->nextFrame) < h->parallelRequests && h->async_failed_frame < 0)
         {
             h->vsapi->getFrameAsync(h->requestedFrames, h->node, async_callback, h);
             atomic_fetch_add(&h->pendingFrames, 1);
@@ -465,36 +464,24 @@ static int read_frame(cli_pic_t *pic, hnd_t handle, int i_frame)
         }
     }
 
-    /* Copy VapourSynth frame into x264-owned buffers */
     const VSVideoFormat *fi = h->vsapi->getVideoFrameFormat(vs_frame);
 
-    for (int p = 0; p < pic->img.planes; p++)
+    for (int i = 0; i < pic->img.planes; i++)
     {
-        int plane = planes[p];
+        pic->img.plane[i] = (uint8_t*)h->vsapi->getReadPtr(vs_frame, planes[i]);
+        pic->img.stride[i] = h->vsapi->getStride(vs_frame, planes[i]);
 
-        const uint8_t *src = h->vsapi->getReadPtr(vs_frame, plane);
-        int src_stride      = h->vsapi->getStride(vs_frame, plane);
-        int plane_height    = h->vsapi->getFrameHeight(vs_frame, plane);
-
-        uint8_t *dst   = pic->img.plane[p];
-        int dst_stride = pic->img.stride[p];
-
-        int row_bytes = X264_MIN(src_stride, dst_stride);
-        for (int y = 0; y < plane_height; y++)
-        {
-            memcpy(dst + (intptr_t)y * dst_stride, src + (intptr_t)y * src_stride, row_bytes);
-        }
-
-        /* Optional up-conversion to 16-bit in-place on x264 buffers */
         if (h->uc_depth && h->bit_depth != h->desired_bit_depth)
         {
-            uint16_t *dst16   = (uint16_t*)dst;
-            int row_pixels    = dst_stride / fi->bytesPerSample;
-            int lshift        = 16 - h->bit_depth;
-
+            /* upconvert non 16bit high depth planes to 16bit using the same
+             * algorithm as used in the depth filter. */
+            uint16_t * plane = (uint16_t*)pic->img.plane[i];
+            int plane_height = h->vsapi->getFrameHeight(vs_frame, planes[i]);
+            int row_pixels = pic->img.stride[i] / fi->bytesPerSample;
+            int lshift = 16 - h->bit_depth;
             for (int y = 0; y < plane_height; y++)
             {
-                uint16_t *row = dst16 + (size_t)y * row_pixels;
+                uint16_t *row = plane + (size_t)y * row_pixels;
                 for (int j = 0; j < row_pixels; j++)
                     row[j] <<= lshift;
             }
