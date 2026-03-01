@@ -130,6 +130,8 @@ static void sigint_handler( int a )
 
 typedef struct {
     int b_progress;
+    int b_binary_units; // 0 = kB/MB/GB, 1 = KiB/MiB/GiB
+    int b_show_gb;   // 1 = additionally display GB/GiB
     int i_seek;
     hnd_t hin;
     hnd_t hout;
@@ -1019,6 +1021,8 @@ static void help( x264_param_t *defaults, int longhelp )
     H1( "\n" );
     H1( "  -v, --verbose               Print stats for each frame\n" );
     H1( "      --no-progress           Don't show the progress indicator while encoding\n" );
+    H0( "      --binary-units          Use binary units (KiB/MiB/GiB) for size display\n" );
+    H0( "      --show-gb               Additionally show size in GB/GiB\n" );
     H0( "      --quiet                 Quiet Mode\n" );
     H1( "      --log-level <string>    Specify the maximum level of logging [\"%s\"]\n"
         "                                  - %s\n", strtable_lookup( x264_log_level_names, cli_log_level - X264_LOG_NONE ),
@@ -1074,6 +1078,8 @@ typedef enum
     OPT_THREAD_INPUT,
     OPT_QUIET,
     OPT_NOPROGRESS,
+    OPT_BINARYUNITS,
+    OPT_SHOWGB,
     OPT_LONGHELP,
     OPT_PROFILE,
     OPT_PRESET,
@@ -1233,6 +1239,8 @@ static struct option long_options[] =
     { "log-file",             required_argument, NULL, OPT_LOG_FILE },
     { "log-file-level",       required_argument, NULL, OPT_LOG_FILE_LEVEL },
     { "no-progress",          no_argument,       NULL, OPT_NOPROGRESS },
+    { "binary-units",         no_argument,       NULL, OPT_BINARYUNITS },
+    { "show-gb",              no_argument,       NULL, OPT_SHOWGB },
     { "dump-yuv",             required_argument, NULL, 0 },
     { "sps-id",               required_argument, NULL, 0 },
     { "aud",                  no_argument,       NULL, 0 },
@@ -1657,6 +1665,12 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
                 goto generic_option;
             case OPT_NOPROGRESS:
                 opt->b_progress = 0;
+                break;
+            case OPT_BINARYUNITS:
+                opt->b_binary_units = 1;
+                break;
+            case OPT_SHOWGB:
+                opt->b_show_gb = 1;
                 break;
             case OPT_TUNE:
             case OPT_PRESET:
@@ -2085,20 +2099,51 @@ static int precision_for_bitrate( double kbps )
            kbps >  999.5 ? 1 : 2;
 }
 
-static void formatSizeKBMB( double bytes, double *num, const char **unit, int *prec )
+static void formatSize( double bytes, int binary, int show_gb, double *num, const char **unit, int *prec )
 {
     const double KB = 1000.0;
     const double MB = 1000.0 * KB;
+    const double GB = 1000.0 * MB;
 
-    if( bytes >= MB )
+    const double KiB = 1024.0;
+    const double MiB = 1024.0 * KiB;
+    const double GiB = 1024.0 * MiB;
+
+    if( !binary ) /* SI */
     {
-        *num  = bytes / MB;
-        *unit = "M";
+        if( show_gb && bytes >= GB )
+        {
+            *num  = bytes / GB;
+            *unit = "G";
+        }
+        else if( bytes >= MB )
+        {
+            *num  = bytes / MB;
+            *unit = "M";
+        }
+        else
+        {
+            *num  = bytes / KB;
+            *unit = "K";
+        }
     }
-    else
+    else          /* binary */
     {
-        *num  = bytes / KB;
-        *unit = "K";
+        if( show_gb && bytes >= GiB )
+        {
+            *num  = bytes / GiB;
+            *unit = "Gi";
+        }
+        else if( bytes >= MiB )
+        {
+            *num  = bytes / MiB;
+            *unit = "Mi";
+        }
+        else
+        {
+            *num  = bytes / KiB;
+            *unit = "Ki";
+        }
     }
 
     if( *num >= 1000.0 )
@@ -2109,14 +2154,14 @@ static void formatSizeKBMB( double bytes, double *num, const char **unit, int *p
         *prec = 2;
 }
 
-static void format_current_and_est_size( double totalBytes, int framesDone, int framesTotal, double *curNum, const char **curUnit, int *curPrec, double *estNum, const char **estUnit, int *estPrec )
+static void format_current_and_est_size( double totalBytes, int framesDone, int framesTotal, double *curNum, const char **curUnit, int *curPrec, double *estNum, const char **estUnit, int *estPrec, int binary, int show_gb )
 {
-    formatSizeKBMB( totalBytes, curNum, curUnit, curPrec );
+    formatSize( totalBytes, binary, show_gb, curNum, curUnit, curPrec );
 
     if( framesDone > 0 && framesTotal > 0 )
     {
         double estBytes = totalBytes * (double)framesTotal / (double)framesDone;
-        formatSizeKBMB( estBytes, estNum, estUnit, estPrec );
+        formatSize( estBytes, binary, show_gb, estNum, estUnit, estPrec );
     }
     else
     {
@@ -2126,7 +2171,7 @@ static void format_current_and_est_size( double totalBytes, int framesDone, int 
     }
 }
 
-static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i_frame_total, int64_t i_file, x264_param_t *param, int64_t ticks )
+static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i_frame_total, int64_t i_file, x264_param_t *param, int64_t ticks, cli_opt_t *opt )
 {
     int64_t now = x264_mdate();
     if( now - i_last < 500000 )
@@ -2143,12 +2188,14 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
     int bitrate_prec = precision_for_bitrate( bitrateKbps );
 
     double file_num = 0.0, estsz_num = 0.0;
-    const char *file_unit = "", *estsz_unit = "";
+    const char *file_unit, *estsz_unit;
     int file_prec = 0, estsz_prec = 0;
 
-    format_current_and_est_size( (double)i_file, i_frame, i_frame_total, &file_num, &file_unit, &file_prec, &estsz_num, &estsz_unit, &estsz_prec );
+    format_current_and_est_size( (double)i_file, i_frame, i_frame_total, &file_num, &file_unit, &file_prec, &estsz_num, &estsz_unit, &estsz_prec, opt->b_binary_units, opt->b_show_gb );
 
+    static int last_len = 0;
     char buf[200];
+    int cur_len;
 
     if( i_frame_total > 0 )
     {
@@ -2165,7 +2212,7 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
         seconds_to_hms( ete_sec, &ete_hh, &ete_mm, &ete_ss );
         seconds_to_hms( eta_sec, &eta_hh, &eta_mm, &eta_ss );
 
-        snprintf( buf, sizeof(buf), "x264 [%.1f%%] %d/%d frames @ %.*f fps | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
+        cur_len = snprintf( buf, sizeof(buf), "x264 [%.1f%%] %d/%d frames @ %.*f fps | %.*f kb/s | %d:%02d:%02d [-%d:%02d:%02d] | %.*f %sB [%.*f %sB]",
                        percentage,
                        i_frame, i_frame_total,
                        fps_prec, fps,
@@ -2177,16 +2224,22 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
     }
     else
     {
-        snprintf( buf, sizeof(buf), "x264 %d frames @ %.*f fps | %.*f kb/s | %.*f %sB",
+        cur_len = snprintf( buf, sizeof(buf), "x264 %d frames @ %.*f fps | %.*f kb/s | %.*f %sB",
                        i_frame,
                        fps_prec, fps,
                        bitrate_prec, bitrateKbps,
                        file_prec, file_num, file_unit );
     }
 
+    if( cur_len < last_len )
+    {
+        fprintf( stderr, "\r%*s\r", last_len, "" );
+    }
+
     fprintf( stderr, "%s\r", buf );
     fflush( stderr );
 
+    last_len = cur_len;
     return now;
 }
 
@@ -2335,7 +2388,7 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
 
         /* update status line (up to 1000 times per input file) */
         if( opt->b_progress && i_frame_output )
-            i_previous = print_status( i_start, i_previous, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts );
+            i_previous = print_status( i_start, i_previous, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts, opt );
     }
     /* Flush delayed frames */
     while( !b_ctrl_c && x264_encoder_delayed_frames( h ) )
@@ -2355,7 +2408,7 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
                 first_dts = prev_dts = last_dts;
         }
         if( opt->b_progress && i_frame_output )
-            i_previous = print_status( i_start, i_previous, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts );
+            i_previous = print_status( i_start, i_previous, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts, opt );
     }
 fail:
     if( pts_warning_cnt >= MAX_PTS_WARNING && cli_log_level < X264_LOG_DEBUG )
@@ -2373,7 +2426,7 @@ fail:
     /* Erase progress indicator before printing encoding stats. */
     if (opt->b_progress && i_frame_output)
     {
-        print_status(i_start, 0, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts);
+        print_status(i_start, 0, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts, opt);
         fprintf(stderr, "\n");
     }
     if( h )
