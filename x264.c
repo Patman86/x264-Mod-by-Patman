@@ -2088,15 +2088,12 @@ static void seconds_to_hms( int sec, int *hh, int *mm, int *ss )
 
 static int precision_for_fps( double fps )
 {
-    return fps > 999.5 ? 0 :
-           fps >  99.5 ? 1 :
-           fps >   9.95 ? 2 : 3;
+    return fps > 999.5 ? 0 : fps >  99.5 ? 1 : fps >   9.95 ? 2 : 3;
 }
 
 static int precision_for_bitrate( double kbps )
 {
-    return kbps > 9999.5 ? 0 :
-           kbps >  999.5 ? 1 : 2;
+    return kbps > 9999.5 ? 0 : kbps >  999.5 ? 1 : 2;
 }
 
 static void formatSize( double bytes, int binary, int show_gb, double *num, const char **unit, int *prec )
@@ -2181,8 +2178,8 @@ static int64_t print_status( int64_t i_start, int64_t i_last, int i_frame, int i
     double elapsed_s   = (double)elapsed_us / 1000000.0;
     double fps         = elapsed_s > 0.0 ? (double)i_frame / elapsed_s : 0.0;
 
-    double seconds = elapsed_s;
-    double bitrateKbps = seconds > 0.0 ? ((double)i_file * 8.0 / 1000.0) / seconds : 0.0;
+    double seconds = (double)i_frame * (double)param->i_fps_den / (double)param->i_fps_num;
+    double bitrateKbps = (seconds > 0.0) ? ((double)i_file * 8.0 / 1000.0) / seconds : 0.0;
 
     int fps_prec     = precision_for_fps( fps );
     int bitrate_prec = precision_for_bitrate( bitrateKbps );
