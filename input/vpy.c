@@ -90,6 +90,7 @@ typedef struct VapourSynthContext
     int                  nextFrame;         /* next frame index expected to be read by CLI */
     int                  parallelRequests;  /* max in-flight async requests */
     int                  async_failed_frame;/* first failing frame index, or <0 on success */
+    int                  abort_async;       /* abort flag */
 
 #ifdef _WIN32
     HANDLE              *frameEvent;        /* per-frame event, size = num_frames */
@@ -106,7 +107,6 @@ typedef struct VapourSynthContext
     int64_t              current_timecode_num;
     int64_t              current_timecode_den;
     int                  desired_bit_depth;
-
 } VapourSynthContext;
 
 
@@ -178,10 +178,14 @@ static void VS_CC async_callback(void *user_data, const VSFrame *f, int n, VSNod
     }
     else
     {
-        if (!h->frameArray[n])
+        if (!h->abort_async && !h->frameArray[n])
         {
             h->frameArray[n] = f;
             atomic_fetch_add(&h->completedFrames, 1);
+        }
+        else if (h->abort_async)
+        {
+            h->vsapi->freeFrame((VSFrame*)f);
         }
     }
 
@@ -338,25 +342,20 @@ static int open_file(char *psz_filename, hnd_t *p_handle, video_info_t *info, cl
 
     h->uc_depth = h->bit_depth & 7;
 
-    /* CSP mapping identical to original vpy.c */
-    uint32_t format_id = h->vsapi->queryVideoFormatID(vi->format.colorFamily, vi->format.sampleType, vi->format.bitsPerSample, vi->format.subSamplingW, vi->format.subSamplingH, h->core);
+    const VSVideoFormat* fmt = &vi->format;
+    const int high_depth = fmt->bitsPerSample > 8 ? X264_CSP_HIGH_DEPTH : 0;
 
-    if (format_id == pfRGB48)
-        info->csp = X264_CSP_BGR | X264_CSP_VFLIP | X264_CSP_HIGH_DEPTH;
-    else if (format_id == pfRGB24)
-        info->csp = X264_CSP_BGR | X264_CSP_VFLIP;
-    else if (format_id == pfYUV444P9 || format_id == pfYUV444P10 || format_id == pfYUV444P12 || format_id == pfYUV444P14 || format_id == pfYUV444P16)
-        info->csp = X264_CSP_I444 | X264_CSP_HIGH_DEPTH;
-    else if (format_id == pfYUV422P9 || format_id == pfYUV422P10 || format_id == pfYUV422P12 || format_id == pfYUV422P14 || format_id == pfYUV422P16)
-        info->csp = X264_CSP_I422 | X264_CSP_HIGH_DEPTH;
-    else if (format_id == pfYUV420P9 || format_id == pfYUV420P10 || format_id == pfYUV420P12 || format_id == pfYUV420P14 || format_id == pfYUV420P16)
-        info->csp = X264_CSP_I420 | X264_CSP_HIGH_DEPTH;
-    else if (format_id == pfYUV444P8)
-        info->csp = X264_CSP_I444;
-    else if (format_id == pfYUV422P8)
-        info->csp = X264_CSP_I422;
-    else if (format_id == pfYUV420P8)
-        info->csp = X264_CSP_I420;
+    if (fmt->colorFamily == cfRGB)
+        info->csp = X264_CSP_BGR | X264_CSP_VFLIP | high_depth;
+    else if (fmt->colorFamily == cfYUV)
+        if (fmt->subSamplingW == 0 && fmt->subSamplingH == 0)
+            info->csp = X264_CSP_I444 | high_depth;
+        else if (fmt->subSamplingW == 1 && fmt->subSamplingH == 0)
+            info->csp = X264_CSP_I422 | high_depth;
+        else if (fmt->subSamplingW == 1 && fmt->subSamplingH == 1)
+            info->csp = X264_CSP_I420 | high_depth;
+    else if (fmt->colorFamily == cfGray)
+        info->csp = X264_CSP_I400 | high_depth;
     else
     {
         char format_name[32];
@@ -369,10 +368,14 @@ static int open_file(char *psz_filename, hnd_t *p_handle, video_info_t *info, cl
 
     info->thread_safe = 1;
 
-    /* Async reader initialisation (x265-style) */
-    h->parallelRequests = core_info.numThreads;
-    if (h->parallelRequests <= 0)
-        h->parallelRequests = 1;
+    /* Async reader initialisation */
+    if (opt->vs_requests > 0) {
+        h->parallelRequests = opt->vs_requests;
+        x264_cli_log("vpy ", X264_LOG_INFO, "using user-defined %d parallel VapourSynth requests\n", h->parallelRequests);
+    } else {
+        h->parallelRequests = core_info.numThreads;
+        x264_cli_log("vpy ", X264_LOG_INFO, "using %d parallel VapourSynth requests\n", h->parallelRequests);
+    }
 
     h->framesToRequest    = h->num_frames;
     h->nextFrame          = 0;
@@ -380,6 +383,7 @@ static int open_file(char *psz_filename, hnd_t *p_handle, video_info_t *info, cl
     h->completedFrames    = 0;
     h->pendingFrames      = 0;
     h->async_failed_frame = -1;
+    h->abort_async        = 0;
 
     h->frameArray = (const VSFrame**)malloc(h->num_frames * sizeof(const VSFrame*));
     FAIL_IF_ERROR(!h->frameArray, "failed to allocate frameArray\n");
@@ -434,6 +438,9 @@ static int read_frame(cli_pic_t *pic, hnd_t handle, int i_frame)
     if (i_frame >= h->num_frames)
         return -1;
 
+    if (h->abort_async)
+        return -1;
+
     if (h->async_failed_frame >= 0 && h->async_failed_frame <= i_frame)
         return -1;
 
@@ -453,35 +460,47 @@ static int read_frame(cli_pic_t *pic, hnd_t handle, int i_frame)
         return -1;
 
     /* Prefetch more frames while keeping a bounded number in-flight */
-    if (h->requestedFrames < h->framesToRequest && h->async_failed_frame < 0)
+    if (!h->abort_async && h->requestedFrames < h->framesToRequest && h->async_failed_frame < 0)
     {
-
-        while (h->requestedFrames < h->framesToRequest && (h->requestedFrames - h->nextFrame) < h->parallelRequests && h->async_failed_frame < 0)
+        int in_flight = (int)(h->requestedFrames - h->nextFrame);
+        if (in_flight < h->parallelRequests)
         {
-            h->vsapi->getFrameAsync(h->requestedFrames, h->node, async_callback, h);
+            int next = (int)h->requestedFrames;
+            h->vsapi->getFrameAsync(next, h->node, async_callback, h);
             atomic_fetch_add(&h->pendingFrames, 1);
-            h->requestedFrames++;
+            h->requestedFrames = next + 1;
         }
     }
 
-    const VSVideoFormat *fi = h->vsapi->getVideoFrameFormat(vs_frame);
+    const VSVideoFormat* fi = h->vsapi->getVideoFrameFormat(vs_frame);
 
+    /* copy VapourSynth frame into x264-owned buffers */
     for (int i = 0; i < pic->img.planes; i++)
     {
-        pic->img.plane[i] = (uint8_t*)h->vsapi->getReadPtr(vs_frame, planes[i]);
-        pic->img.stride[i] = h->vsapi->getStride(vs_frame, planes[i]);
+        int plane = i; /* 0,1,2 for Y,U,V or B,G,R */
 
+        const uint8_t* src = h->vsapi->getReadPtr(vs_frame, plane);
+        int src_stride = h->vsapi->getStride(vs_frame, plane);
+        int plane_height = h->vsapi->getFrameHeight(vs_frame, plane);
+
+        uint8_t* dst = pic->img.plane[i];
+        int dst_stride = pic->img.stride[i];
+
+        /* copy min(src_stride, dst_stride) bytes per row */
+        int row_bytes = X264_MIN(src_stride, dst_stride);
+        for (int y = 0; y < plane_height; y++)
+            memcpy(dst + (intptr_t)y * dst_stride, src + (intptr_t)y * src_stride, row_bytes);
+
+        /* optional up-conversion to 16-bit in-place on x264 buffers */
         if (h->uc_depth && h->bit_depth != h->desired_bit_depth)
         {
-            /* upconvert non 16bit high depth planes to 16bit using the same
-             * algorithm as used in the depth filter. */
-            uint16_t * plane = (uint16_t*)pic->img.plane[i];
-            int plane_height = h->vsapi->getFrameHeight(vs_frame, planes[i]);
-            int row_pixels = pic->img.stride[i] / fi->bytesPerSample;
+            uint16_t* dst16 = (uint16_t*)dst;
+            int row_pixels = dst_stride / fi->bytesPerSample;
             int lshift = 16 - h->bit_depth;
+
             for (int y = 0; y < plane_height; y++)
             {
-                uint16_t *row = plane + (size_t)y * row_pixels;
+                uint16_t* row = dst16 + (size_t)y * row_pixels;
                 for (int j = 0; j < row_pixels; j++)
                     row[j] <<= lshift;
             }
@@ -537,12 +556,19 @@ static int close_file(hnd_t handle)
 {
     VapourSynthContext *h = (VapourSynthContext*)handle;
 
+    h->abort_async = 1;
+
     /* Wait for all pending async requests to complete */
     atomic_int out;
     while ((out = atomic_load(&h->pendingFrames)) != 0)
     {
         x264_cli_log("vpy ", X264_LOG_DEBUG, "waiting for %d async frame requests to complete... \r", out);
         vs_sleep();
+    }
+
+    if (h->nextFrame < h->num_frames)
+    {
+        x264_cli_log("vpy ", X264_LOG_WARNING, "only %d/%d frames delivered from VapourSynth\n", h->nextFrame, h->num_frames);
     }
 
     /* Free frames that were never consumed (e.g., early stop) */

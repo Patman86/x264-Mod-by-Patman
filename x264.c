@@ -130,8 +130,8 @@ static void sigint_handler( int a )
 
 typedef struct {
     int b_progress;
-    int b_binary_units; // 0 = kB/MB/GB, 1 = KiB/MiB/GiB
-    int b_show_gb;   // 1 = additionally display GB/GiB
+    int b_binary_units;
+    int b_show_gb;
     int i_seek;
     hnd_t hin;
     hnd_t hout;
@@ -1021,8 +1021,8 @@ static void help( x264_param_t *defaults, int longhelp )
     H1( "\n" );
     H1( "  -v, --verbose               Print stats for each frame\n" );
     H1( "      --no-progress           Don't show the progress indicator while encoding\n" );
-    H0( "      --binary-units          Use binary units (KiB/MiB/GiB) for size display\n" );
-    H0( "      --show-gb               Additionally show size in GB/GiB\n" );
+    H1( "      --binary-units          Use binary units (KiB/MiB/GiB) for size display\n" );
+    H1( "      --show-gb               Additionally show size in GB/GiB\n" );
     H0( "      --quiet                 Quiet Mode\n" );
     H1( "      --log-level <string>    Specify the maximum level of logging [\"%s\"]\n"
         "                                  - %s\n", strtable_lookup( x264_log_level_names, cli_log_level - X264_LOG_NONE ),
@@ -1034,6 +1034,9 @@ static void help( x264_param_t *defaults, int longhelp )
     H1( "      --psnr                  Enable PSNR computation\n" );
     H1( "      --ssim                  Enable SSIM computation\n" );
     H1( "      --threads <integer>     Force a specific number of threads\n" );
+    H1( "      --vs-requests <integer> Number of parallel VapourSynth frame requests\n"
+        "                                  = 0 - auto (default)\n"
+        "                                  > 0 - explicit count (higher values can impact memory usage and stability with heavy filters)\n" );
     H2( "      --lookahead-threads <integer> Force a specific number of lookahead threads\n" );
     H2( "      --sliced-threads        Low-latency but lower-efficiency threading\n" );
     H2( "      --thread-input          Run Avisynth in its own thread\n" );
@@ -1110,7 +1113,8 @@ typedef enum
     OPT_INPUT_RANGE,
     OPT_RANGE,
     OPT_FRAMESERVER_LIB,
-    OPT_COLORMATRIX
+    OPT_COLORMATRIX,
+    OPT_VS_REQUESTS
 } OptionsOPT;
 
 static char short_options[] = "8A:B:b:f:hI:i:m:o:p:q:r:t:Vvw";
@@ -1289,6 +1293,7 @@ static struct option long_options[] =
     { "output-csp",           required_argument, NULL, OPT_OUTPUT_CSP },
     { "input-range",          required_argument, NULL, OPT_INPUT_RANGE },
     { "synth-lib",            required_argument, NULL, OPT_FRAMESERVER_LIB },
+    { "vs-requests",          required_argument, NULL, OPT_VS_REQUESTS },
     { "stitchable",           no_argument,       NULL, 0 },
     { "filler",               no_argument,       NULL, 0 },
     { NULL,                   0,                 NULL, 0 }
@@ -1580,6 +1585,7 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
     input_opt.bit_depth = 8;
     input_opt.input_range = input_opt.output_range = param->vui.b_fullrange = RANGE_AUTO;
     input_opt.b_accurate_fps = param->b_accurate_fps = 0;
+    input_opt.vs_requests = 0;
     int output_csp = defaults.i_csp;
     opt->b_progress = 1;
 
@@ -1671,6 +1677,12 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
                 break;
             case OPT_SHOWGB:
                 opt->b_show_gb = 1;
+                break;
+            case OPT_VS_REQUESTS:
+                int v = atoi(optarg);
+                if (v < 0)
+                    v = 0;
+                input_opt.vs_requests = v;
                 break;
             case OPT_TUNE:
             case OPT_PRESET:

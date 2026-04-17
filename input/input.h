@@ -51,6 +51,7 @@ typedef struct
     char* frameserver_lib_path; /* path to external frameserver library */
     int b_accurate_fps;
     int desired_bit_depth;
+    int vs_requests;
 } cli_input_opt_t;
 
 /* properties of the source given by the demuxer */
