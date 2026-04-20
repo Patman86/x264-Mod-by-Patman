@@ -377,7 +377,7 @@ void x264_cli_printf( int i_level, const char *fmt, ... )
 static void print_version_info( void )
 {
 #ifdef X264_POINTVER
-    printf( "x264 "X264_POINTVER" [Mod by Patman]\n" );
+    printf( "x264-"X264_POINTVER"-[Mod by Patman]\n" );
 #else
     printf( "x264 0.%d.X [Mod by Patman]\n", X264_BUILD );
 #endif
@@ -400,7 +400,15 @@ static void print_version_info( void )
 #ifdef __INTEL_COMPILER
     printf( "intel: %.2f (%d)\n", __INTEL_COMPILER / 100.f, __INTEL_COMPILER_BUILD_DATE );
 #elif defined(__clang__)
-    printf( "clang: " __clang_version__ "\n" );
+#   if defined(__clang_major__) && defined(__clang_minor__)
+        printf( "clang: %d.%d", __clang_major__, __clang_minor__ );
+#       if defined(__clang_patchlevel__)
+        printf( ".%d", __clang_patchlevel__ );
+#       endif
+        printf( "\n" );
+#   else
+        printf( "clang: " __clang_version__ "\n" );
+#   endif
 #elif defined(__GNUC__)
     printf( "gcc: " __VERSION__ "\n" );
 #elif defined(_MSC_FULL_VER)
