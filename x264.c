@@ -377,7 +377,7 @@ void x264_cli_printf( int i_level, const char *fmt, ... )
 static void print_version_info( void )
 {
 #ifdef X264_POINTVER
-    printf( "x264-"X264_POINTVER"-[Mod by Patman]\n" );
+    printf( "x264 "X264_POINTVER" [Mod by Patman]\n" );
 #else
     printf( "x264 0.%d.X [Mod by Patman]\n", X264_BUILD );
 #endif
