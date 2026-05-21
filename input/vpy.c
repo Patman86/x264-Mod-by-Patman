@@ -52,8 +52,9 @@ typedef WCHAR  libp_t;
 #else
 #include <dlfcn.h>
 #include <unistd.h>
+#include <ctype.h>
 typedef char   libp_t;
-#define vs_open(library)     dlopen((library), RTLD_GLOBAL | RTLD_LAZY | RTLD_NOW)
+#define vs_open(library)     dlopen((library), RTLD_GLOBAL | RTLD_NOW)
 #define vs_close             dlclose
 #define vs_address           dlsym
 #define vs_sleep()           usleep(500)
@@ -151,7 +152,7 @@ static int get_core_revision(const char *vsVersionString)
         {
             strcpy(buf, api_info);
             for (char *s = buf; *s; s++)
-                *s = (char)tolower(*s);
+                *s = (char)tolower((unsigned char)*s);
 
             int rev = 0;
             return (1 == vs_sscanf(buf, "core r%d", &rev)) ? rev : 0;
@@ -345,19 +346,18 @@ static int open_file(char *psz_filename, hnd_t *p_handle, video_info_t *info, cl
     const VSVideoFormat* fmt = &vi->format;
     const int high_depth = fmt->bitsPerSample > 8 ? X264_CSP_HIGH_DEPTH : 0;
 
-    if (fmt->colorFamily == cfRGB)
+    if (fmt->colorFamily == cfRGB) {
         info->csp = X264_CSP_BGR | X264_CSP_VFLIP | high_depth;
-    else if (fmt->colorFamily == cfYUV)
+    } else if (fmt->colorFamily == cfYUV) {
         if (fmt->subSamplingW == 0 && fmt->subSamplingH == 0)
             info->csp = X264_CSP_I444 | high_depth;
         else if (fmt->subSamplingW == 1 && fmt->subSamplingH == 0)
             info->csp = X264_CSP_I422 | high_depth;
         else if (fmt->subSamplingW == 1 && fmt->subSamplingH == 1)
             info->csp = X264_CSP_I420 | high_depth;
-    else if (fmt->colorFamily == cfGray)
+    } else if (fmt->colorFamily == cfGray) {
         info->csp = X264_CSP_I400 | high_depth;
-    else
-    {
+    } else {
         char format_name[32];
         h->vsapi->getVideoFormatName(&vi->format, format_name);
         FAIL_IF_ERROR(1, "not supported pixel type: %s\n", format_name);
@@ -477,7 +477,7 @@ static int read_frame(cli_pic_t *pic, hnd_t handle, int i_frame)
     /* copy VapourSynth frame into x264-owned buffers */
     for (int i = 0; i < pic->img.planes; i++)
     {
-        int plane = i; /* 0,1,2 for Y,U,V or B,G,R */
+        int plane = planes[i]; /* 0,1,2 for Y,U,V or B,G,R */
 
         const uint8_t* src = h->vsapi->getReadPtr(vs_frame, plane);
         int src_stride = h->vsapi->getStride(vs_frame, plane);
