@@ -952,10 +952,14 @@ log_msg ""
 cc_check || die "No working C compiler found."
 
 if [ $compiler_style = GNU ]; then
-    if cc_check '' -std=gnu99 'for( int i = 0; i < 9; i++ );' ; then
+    if cc_check '' -std=gnu11 'for( int i = 0; i < 9; i++ );' ; then
+        CFLAGS="$CFLAGS -std=gnu11 -D_GNU_SOURCE"
+    elif cc_check '' -std=gnu99 'for( int i = 0; i < 9; i++ );' ; then
         CFLAGS="$CFLAGS -std=gnu99 -D_GNU_SOURCE"
+    elif cc_check '' -std=c11 'for( int i = 0; i < 9; i++ );' ; then
+        CFLAGS="$CFLAGS -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE"
     elif cc_check '' -std=c99 'for( int i = 0; i < 9; i++ );' ; then
-        CFLAGS="$CFLAGS -std=c99 -D_POSIX_C_SOURCE=200112L -D_BSD_SOURCE"
+        CFLAGS="$CFLAGS -std=c99 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE"
     elif ! cc_check '' '' 'for( int i = 0; i < 9; i++ );' ; then
         die "C99 compiler is needed for compilation."
     fi
