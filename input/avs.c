@@ -34,7 +34,10 @@ typedef WCHAR libp_t;
 #else
 typedef char libp_t;
 #include <dlfcn.h>
-#define avs_open(library) dlopen(library, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOW)
+#ifndef RTLD_DEEPBIND
+#define RTLD_DEEPBIND 0
+#endif
+#define avs_open(library) dlopen(library, RTLD_NOW | RTLD_DEEPBIND)
 #define avs_close dlclose
 #define avs_address dlsym
 #endif
