@@ -1758,7 +1758,15 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     if( !h->param.cpu )
         p += sprintf( p, " none!" );
     x264_log( h, X264_LOG_INFO, "AVC Encoder x264 core %d%s [Mod by Patman]\n", X264_BUILD, X264_VERSION );
-    x264_log( h, X264_LOG_INFO, "%s\n", buf );
+#if defined(__clang__)
+    x264_log( h, X264_LOG_INFO, "built with Clang %d.%d.%d\n", __clang_major__, __clang_minor__, __clang_patchlevel__ );
+#elif defined(__GNUC__)
+    x264_log( h, X264_LOG_INFO, "built with GCC %d.%d.%d\n", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__ );
+#elif defined(_MSC_VER)
+    x264_log( h, X264_LOG_INFO, "built with MSVC %d\n", _MSC_VER );
+#else
+    x264_log( h, X264_LOG_INFO, "built with unknown compiler\n" );
+#endif    x264_log( h, X264_LOG_INFO, "%s\n", buf );
 
     if( x264_analyse_init_costs( h ) )
         goto fail;
