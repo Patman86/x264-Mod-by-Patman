@@ -582,14 +582,26 @@ INSTALL="${INSTALL-install}"
 PKGCONFIG="${PKGCONFIG-${cross_prefix}pkg-config}"
 
 # ar and ranlib doesn't load the LTO plugin by default, prefer the gcc-prefixed wrappers which does.
-if ${cross_prefix}gcc-ar --version >/dev/null 2>&1; then
+if $CC --version 2>/dev/null | grep -qi clang; then
+    if command -v ${cross_prefix}llvm-ar >/dev/null 2>&1; then
+        AR="${AR-${cross_prefix}llvm-ar}"
+    else
+        AR="${AR-${cross_prefix}ar}"
+    fi
+    if command -v ${cross_prefix}llvm-ranlib >/dev/null 2>&1; then
+        RANLIB="${RANLIB-${cross_prefix}llvm-ranlib}"
+    else
+        RANLIB="${RANLIB-${cross_prefix}ranlib}"
+    fi
+elif ${cross_prefix}gcc-ar --version >/dev/null 2>&1; then
     AR="${AR-${cross_prefix}gcc-ar}"
+    if ${cross_prefix}gcc-ranlib --version >/dev/null 2>&1; then
+        RANLIB="${RANLIB-${cross_prefix}gcc-ranlib}"
+    else
+        RANLIB="${RANLIB-${cross_prefix}ranlib}"
+    fi
 else
     AR="${AR-${cross_prefix}ar}"
-fi
-if ${cross_prefix}gcc-ranlib --version >/dev/null 2>&1; then
-    RANLIB="${RANLIB-${cross_prefix}gcc-ranlib}"
-else
     RANLIB="${RANLIB-${cross_prefix}ranlib}"
 fi
 
@@ -616,6 +628,10 @@ if [[ $host_os = mingw* || $host_os = msys* || $host_os = cygwin* ]]; then
         [[ $host_os = cygwin* ]] && die "Windows Intel Compiler support requires MSYS"
         compiler=ICL
         compiler_style=MS
+    elif [[ "$cc_base" = clang-cl || "$cc_base" = clang-cl.exe ]]; then
+        compiler=CLANGCL
+        compiler_style=MS
+        CFLAGS="$CFLAGS -nologo -DHAVE_STRING_H -I\$(SRCPATH)/extras"
         CFLAGS="$CFLAGS -Qstd=c99 -nologo -Qms0 -DHAVE_STRING_H -I\$(SRCPATH)/extras"
         QPRE="-Q"
         cpp_check '' '' '_MSC_VER >= 1400' || die "Windows Intel Compiler support requires Visual Studio 2005 or newer"
@@ -627,6 +643,12 @@ if [[ $host_os = mingw* || $host_os = msys* || $host_os = cygwin* ]]; then
         if cc_check '' -Qdiag-error:10006,10157 ; then
             CHECK_CFLAGS="$CHECK_CFLAGS -Qdiag-error:10006,10157"
         fi
+    elif [[ "$cc_base" = clang || "$cc_base" = clang.exe || "$cc_base" = clang-* || \
+        "$cc_base" = clang++ || "$cc_base" = clang++.exe || "$cc_base" = clang++-* ]]; then
+        compiler=CLANG
+        compiler_style=GNU
+        # MinGW uses broken pre-VS2015 Microsoft printf functions unless it's told to use the POSIX ones.
+        CFLAGS="$CFLAGS -D_POSIX_C_SOURCE=200112L"
     elif [[ "$cc_base" = cl || "$cc_base" = cl[\ .]* ]]; then
         # Standard Microsoft Visual Studio
         compiler=CL
@@ -650,10 +672,12 @@ else
     if [[ "$cc_base" = icc || "$cc_base" = icc[\ .]* ]]; then
         AR="xiar"
         compiler=ICC
-    fi
+    elif $CC --version 2>/dev/null | grep -qi clang; then
+        compiler=CLANG
+fi
 fi
 
-if [ $compiler = GNU ]; then
+if [ $compiler = GNU -o $compiler = CLANG ]; then
     if cc_check '' -Werror=unknown-warning-option ; then
         CHECK_CFLAGS="$CHECK_CFLAGS -Werror=unknown-warning-option"
     fi
@@ -724,7 +748,7 @@ case $host_os in
             SYS="WINDOWS"
             DEVNULL="NUL"
             cc_check '' -lshell32 && LDFLAGSCLI="$LDFLAGSCLI -lshell32"
-            [ $compiler = GNU ] && RC="${RC-${cross_prefix}windres}" || RC="${RC-rc.exe}"
+            [ $compiler = GNU -o $compiler = CLANG ] && RC="${RC-${cross_prefix}windres}" || RC="${RC-rc.exe}"
         fi
         ;;
     sunos*|solaris*)
@@ -1450,11 +1474,27 @@ if [ "$debug" = "yes" ]; then
     RCFLAGS="$RCFLAGS -DDEBUG"
 else
     CFLAGS="-O3 -ffast-math $CFLAGS"
-    if [ "$lto" = "auto" ] && [ $compiler = GNU ] && cc_check "" "-flto" ; then
+    if [ "$debug" = "yes" ]; then
+        CFLAGS="-O1 -g $CFLAGS"
+        RCFLAGS="$RCFLAGS -DDEBUG"
+    else
+        CFLAGS="-O3 -ffast-math $CFLAGS"
+
+    if [ "$lto" = "auto" ] && [ "$compiler" = "GNU" ] && cc_check "" "-flto" ; then
         lto="yes"
         CFLAGS="$CFLAGS -flto"
         LDFLAGS="$LDFLAGS -O3 -flto"
+    elif [ "$lto" = "auto" ] && [ "$compiler" = "CLANG" ] && cc_check "" "-flto" ; then
+        lto="yes"
+        CFLAGS="$CFLAGS -flto"
+        if cc_check "" "-flto -fuse-ld=lld" ; then
+            LDFLAGS="$LDFLAGS -O3 -flto -fuse-ld=lld"
+        else
+            LDFLAGS="$LDFLAGS -O3 -flto"
+        fi
     fi
+fi
+[ "$lto" = "auto" ] && lto="no"
 fi
 [ "$lto" = "auto" ] && lto="no"
 
