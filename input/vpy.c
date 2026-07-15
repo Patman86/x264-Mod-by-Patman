@@ -28,14 +28,14 @@
 #include "input.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <ctype.h>
 
 #ifdef _MSC_VER
-#include <intrin.h>
 #include <windows.h>
+#include <io.h>
 typedef volatile LONG vpy_atomic_t;
 static __forceinline LONG vpy_atomic_load(vpy_atomic_t *object)
 {
@@ -53,6 +53,7 @@ static __forceinline LONG vpy_atomic_fetch_sub(vpy_atomic_t *object, LONG x)
 #include <stdatomic.h>
 #include <dlfcn.h>
 #include <unistd.h>
+
 typedef _Atomic int vpy_atomic_t;
 static inline int vpy_atomic_load(vpy_atomic_t *object)
 {
@@ -95,8 +96,9 @@ typedef char libp_t;
 
 #define FAIL_IF_ERROR(cond, ...) FAIL_IF_ERR(cond, "vpy ", __VA_ARGS__)
 
-/* Function pointer type for VSScript API loader */
+/* Function pointer types for VSScript API loader */
 typedef const VSSCRIPTAPI * (VS_CC *type_getVSScriptAPI)(int version);
+typedef const char * (VS_CC *type_getVSScriptAPILastError)(void);
 
 typedef struct VpyFrameSlot
 {
@@ -114,6 +116,7 @@ typedef struct VapourSynthContext
     /* VapourSynth handles */
     void *library;
     type_getVSScriptAPI func_getVSScriptAPI;
+    type_getVSScriptAPILastError func_getVSScriptAPILastError;
     const VSSCRIPTAPI *vssapi;
     const VSAPI *vsapi;
     VSScript *script;
@@ -306,17 +309,47 @@ static void VS_CC async_callback(void *user_data, const VSFrame *f, int n, VSNod
  * Load VapourSynth script library (VSScript)
  * ------------------------------------------------------------------------ */
 
+#ifndef _WIN32
+static int try_vs_open(void **library, const char *path)
+{
+    if (!path || !*path)
+        return -1;
+
+    *library = vs_open(path);
+    return *library ? 0 : -1;
+}
+#endif
+
 static int custom_vs_load_library(VapourSynthContext *h, cli_input_opt_t *opt)
 {
 #ifdef _WIN32
     libp_t *library_path = L"vsscript";
     libp_t *tmp_buf = NULL;
 #else
-#   if SYS_MACOSX
-    libp_t *library_path = "libvapoursynth-script.dylib";
-#   else
-    libp_t *library_path = "libvapoursynth-script.so";
-#   endif
+#if SYS_MACOSX
+    const char *default_names[] =
+    {
+        "libvsscript.dylib",
+        "libvapoursynth-script.dylib",
+        "/opt/homebrew/lib/libvsscript.dylib",
+        "/usr/local/lib/libvsscript.dylib",
+        "/opt/homebrew/lib/libvapoursynth-script.dylib",
+        "/usr/local/lib/libvapoursynth-script.dylib",
+        NULL
+    };
+#else
+    const char *default_names[] =
+    {
+        "libvsscript.so",
+        "libvapoursynth-script.so",
+        "/usr/lib/libvsscript.so",
+        "/usr/local/lib/libvsscript.so",
+        NULL
+    };
+#endif
+    const char *env_path = getenv("VSSCRIPT_PATH");
+    const char **candidate = NULL;
+    const char *library_path = NULL;
 #endif
 
     if (opt->frameserver_lib_path)
@@ -335,23 +368,55 @@ static int custom_vs_load_library(VapourSynthContext *h, cli_input_opt_t *opt)
         library_path = opt->frameserver_lib_path;
 #endif
         x264_cli_log("vpy ", X264_LOG_INFO,
-                     "using external VapourSynth library from %s\n",
+                     "using external VapourSynth library from: \"%s\"\n",
                      opt->frameserver_lib_path);
     }
 
+#ifdef _WIN32
     h->library = vs_open(library_path);
 
-#ifdef _WIN32
     if (tmp_buf)
         free(tmp_buf);
-#endif
 
     if (!h->library)
         return -1;
+#else
+    if (library_path)
+    {
+        h->library = vs_open(library_path);
+        if (!h->library)
+            return -1;
+    }
+    else
+    {
+        if (env_path && *env_path)
+        {
+            x264_cli_log("vpy ", X264_LOG_INFO,
+                         "using VSSCRIPT_PATH: \"%s\"\n", env_path);
+
+            if (!try_vs_open(&h->library, env_path))
+                goto library_loaded;
+        }
+
+        for (candidate = default_names; *candidate; candidate++)
+        {
+            if (!try_vs_open(&h->library, *candidate))
+                goto library_loaded;
+        }
+
+        return -1;
+    }
+
+library_loaded:
+    ;
+#endif
 
     h->func_getVSScriptAPI = (type_getVSScriptAPI)vs_address(h->library, "getVSScriptAPI");
     FAIL_IF_ERROR(!h->func_getVSScriptAPI,
-                  "failed to load getVSScriptAPI function. Upgrade Vapoursynth to R55 or newer!\n");
+                  "failed to load getVSScriptAPI function. Upgrade VapourSynth to R55 or newer!\n");
+
+    h->func_getVSScriptAPILastError =
+        (type_getVSScriptAPILastError)vs_address(h->library, "getVSScriptAPILastError");
 
     return 0;
 }
@@ -391,7 +456,16 @@ static int open_file(char *psz_filename, hnd_t *p_handle, video_info_t *info, cl
         goto fail;
 
     h->vssapi = h->func_getVSScriptAPI(VSSCRIPT_API_VERSION);
-    FAIL_IF_ERROR(!h->vssapi, "failed to initialize VSScript\n");
+    if (!h->vssapi)
+    {
+        const char *detail = NULL;
+        if (h->func_getVSScriptAPILastError)
+            detail = h->func_getVSScriptAPILastError();
+
+        FAIL_IF_ERROR(1, "failed to initialize VSScript%s%s\n",
+                      detail ? ": " : "",
+                      detail ? detail : "");
+    }
 
     h->vsapi = h->vssapi->getVSAPI(VAPOURSYNTH_API_VERSION);
     FAIL_IF_ERROR(!h->vsapi, "failed to get VapourSynth API pointer\n");
@@ -434,7 +508,7 @@ static int open_file(char *psz_filename, hnd_t *p_handle, video_info_t *info, cl
     props = h->vsapi->getFramePropertiesRO(frame0);
     sar_num = h->vsapi->mapGetInt(props, "_SARNum", 0, &err_sar_num);
     sar_den = h->vsapi->mapGetInt(props, "_SARDen", 0, &err_sar_den);
-    info->sar_width  = (!err_sar_num && sar_num > 0) ? (int)sar_num : 0;
+    info->sar_width = (!err_sar_num && sar_num > 0) ? (int)sar_num : 0;
     info->sar_height = (!err_sar_den && sar_den > 0) ? (int)sar_den : 0;
 
     if (vi->fpsNum == 0 && vi->fpsDen == 0)
