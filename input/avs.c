@@ -47,7 +47,7 @@ typedef char libp_t;
 #include "extras/avisynth_c.h"
 #define AVSC_DECLARE_FUNC(name) name##_func name
 
-#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "avs ", __VA_ARGS__ )
+#define FAIL_IF_ERROR(cond, ...) FAIL_IF_ERR(cond, "avs ", __VA_ARGS__)
 
 /* AVS uses a versioned interface to control backwards compatibility */
 /* YV12 support is required, which was added in 2.5 */
@@ -60,26 +60,25 @@ typedef char libp_t;
 /* maximum size of the sequence of filters to try on non script files */
 #define AVS_MAX_SEQUENCE 5
 
-#define LOAD_AVS_FUNC(name, continue_on_fail)\
-{\
-    h->func.name = (void*)avs_address( h->library, #name );\
-    if( !continue_on_fail && !h->func.name )\
-        goto fail;\
-}
+#define LOAD_AVS_FUNC(name, continue_on_fail) \
+do { \
+    h->func.name = (void*)avs_address(h->library, #name); \
+    if( !(continue_on_fail) && !h->func.name ) \
+        goto fail; \
+} while(0)
 
-#define LOAD_AVS_FUNC_ALIAS(name, alias, continue_on_fail)\
-{\
-    if( !h->func.name )\
-        h->func.name = (void*)avs_address( h->library, alias );\
-    if( !continue_on_fail && !h->func.name )\
-        goto fail;\
-}
+#define LOAD_AVS_FUNC_ALIAS(name, alias, continue_on_fail) \
+do { \
+    if( !h->func.name ) \
+        h->func.name = (void*)avs_address(h->library, alias); \
+    if( !(continue_on_fail) && !h->func.name ) \
+        goto fail; \
+} while(0)
 
 typedef struct
 {
     AVS_Clip *clip;
     AVS_ScriptEnvironment *env;
-    libp_t lib_path;
     void *library;
     int num_frames;
     int bit_depth;
@@ -88,71 +87,110 @@ typedef struct
     int desired_bit_depth;
     struct
     {
-        AVSC_DECLARE_FUNC( avs_clip_get_error );
-        AVSC_DECLARE_FUNC( avs_create_script_environment );
-        AVSC_DECLARE_FUNC( avs_delete_script_environment );
-        AVSC_DECLARE_FUNC( avs_get_error );
-        AVSC_DECLARE_FUNC( avs_get_frame );
-        AVSC_DECLARE_FUNC( avs_get_video_info );
-        AVSC_DECLARE_FUNC( avs_function_exists );
-        AVSC_DECLARE_FUNC( avs_invoke );
-        AVSC_DECLARE_FUNC( avs_release_clip );
-        AVSC_DECLARE_FUNC( avs_release_value );
-        AVSC_DECLARE_FUNC( avs_release_video_frame );
-        AVSC_DECLARE_FUNC( avs_take_clip );
-        AVSC_DECLARE_FUNC( avs_is_yv24 );
-        AVSC_DECLARE_FUNC( avs_is_yv16 );
-        AVSC_DECLARE_FUNC( avs_is_yv12 );
-        AVSC_DECLARE_FUNC( avs_is_yv411 );
-        AVSC_DECLARE_FUNC( avs_is_y8 );
-        AVSC_DECLARE_FUNC( avs_is_rgb48 );
-        AVSC_DECLARE_FUNC( avs_is_rgb64 );
-        AVSC_DECLARE_FUNC( avs_is_444 );
-        AVSC_DECLARE_FUNC( avs_is_422 );
-        AVSC_DECLARE_FUNC( avs_is_420 );
-        AVSC_DECLARE_FUNC( avs_is_y );
-        AVSC_DECLARE_FUNC( avs_component_size );
-        AVSC_DECLARE_FUNC( avs_bits_per_component );
-        AVSC_DECLARE_FUNC( avs_get_height_p );
-        AVSC_DECLARE_FUNC( avs_get_pitch_p );
-        AVSC_DECLARE_FUNC( avs_get_read_ptr_p );
+        AVSC_DECLARE_FUNC(avs_clip_get_error);
+        AVSC_DECLARE_FUNC(avs_create_script_environment);
+        AVSC_DECLARE_FUNC(avs_delete_script_environment);
+        AVSC_DECLARE_FUNC(avs_get_error);
+        AVSC_DECLARE_FUNC(avs_get_frame);
+        AVSC_DECLARE_FUNC(avs_get_video_info);
+        AVSC_DECLARE_FUNC(avs_function_exists);
+        AVSC_DECLARE_FUNC(avs_invoke);
+        AVSC_DECLARE_FUNC(avs_release_clip);
+        AVSC_DECLARE_FUNC(avs_release_value);
+        AVSC_DECLARE_FUNC(avs_release_video_frame);
+        AVSC_DECLARE_FUNC(avs_take_clip);
+        AVSC_DECLARE_FUNC(avs_set_to_clip);
+        AVSC_DECLARE_FUNC(avs_is_yv24);
+        AVSC_DECLARE_FUNC(avs_is_yv16);
+        AVSC_DECLARE_FUNC(avs_is_yv12);
+        AVSC_DECLARE_FUNC(avs_is_yv411);
+        AVSC_DECLARE_FUNC(avs_is_y8);
+        AVSC_DECLARE_FUNC(avs_is_rgb48);
+        AVSC_DECLARE_FUNC(avs_is_rgb64);
+        AVSC_DECLARE_FUNC(avs_is_444);
+        AVSC_DECLARE_FUNC(avs_is_422);
+        AVSC_DECLARE_FUNC(avs_is_420);
+        AVSC_DECLARE_FUNC(avs_is_y);
+        AVSC_DECLARE_FUNC(avs_component_size);
+        AVSC_DECLARE_FUNC(avs_bits_per_component);
+        AVSC_DECLARE_FUNC(avs_get_height_p);
+        AVSC_DECLARE_FUNC(avs_get_pitch_p);
+        AVSC_DECLARE_FUNC(avs_get_read_ptr_p);
     } func;
 } avs_hnd_t;
+
+/* compatibility / fallback helpers */
+#define AVS_IS_YV24(vi)    (h->func.avs_is_yv24  && h->func.avs_is_yv24(vi))
+#define AVS_IS_YV16(vi)    (h->func.avs_is_yv16  && h->func.avs_is_yv16(vi))
+#define AVS_IS_YV12(vi)    (h->func.avs_is_yv12  && h->func.avs_is_yv12(vi))
+#define AVS_IS_YV411(vi)   (h->func.avs_is_yv411 && h->func.avs_is_yv411(vi))
+#define AVS_IS_Y8(vi)      (h->func.avs_is_y8    && h->func.avs_is_y8(vi))
+
+#define AVS_IS_AVISYNTHPLUS (h->func.avs_is_420 && h->func.avs_is_422 && h->func.avs_is_444)
+#define AVS_IS_420(vi)     (h->func.avs_is_420 ? h->func.avs_is_420(vi) : AVS_IS_YV12(vi))
+#define AVS_IS_422(vi)     (h->func.avs_is_422 ? h->func.avs_is_422(vi) : AVS_IS_YV16(vi))
+#define AVS_IS_444(vi)     (h->func.avs_is_444 ? h->func.avs_is_444(vi) : AVS_IS_YV24(vi))
+#define AVS_IS_RGB48(vi)   (h->func.avs_is_rgb48 && h->func.avs_is_rgb48(vi))
+#define AVS_IS_RGB64(vi)   (h->func.avs_is_rgb64 && h->func.avs_is_rgb64(vi))
+#define AVS_IS_Y(vi)       (h->func.avs_is_y ? h->func.avs_is_y(vi) : AVS_IS_Y8(vi))
+
+#define AVS_BITS_PER_COMPONENT(vi) \
+    (h->func.avs_bits_per_component ? h->func.avs_bits_per_component(vi) : 8)
+#define AVS_COMPONENT_SIZE(vi) \
+    (h->func.avs_component_size ? h->func.avs_component_size(vi) : ((AVS_BITS_PER_COMPONENT(vi) + 7) / 8))
+
+#define AVS_GET_HEIGHT_P(p, plane) \
+    (h->func.avs_get_height_p ? h->func.avs_get_height_p((p), (plane)) : 0)
+#define AVS_GET_PITCH_P(p, plane) \
+    (h->func.avs_get_pitch_p ? h->func.avs_get_pitch_p((p), (plane)) : 0)
+#define AVS_GET_READ_PTR_P(p, plane) \
+    (h->func.avs_get_read_ptr_p ? h->func.avs_get_read_ptr_p((p), (plane)) : NULL)
+
+/* No need in separated bitdepth detection on Avs+ side */
+#define AVS_IS_YUV420_HBD(vi) (AVS_IS_420(vi) && AVS_BITS_PER_COMPONENT(vi) > 8 && AVS_BITS_PER_COMPONENT(vi) <= 16)
+#define AVS_IS_YUV422_HBD(vi) (AVS_IS_422(vi) && AVS_BITS_PER_COMPONENT(vi) > 8 && AVS_BITS_PER_COMPONENT(vi) <= 16)
+#define AVS_IS_YUV444_HBD(vi) (AVS_IS_444(vi) && AVS_BITS_PER_COMPONENT(vi) > 8 && AVS_BITS_PER_COMPONENT(vi) <= 16)
+#define AVS_IS_Y_HBD(vi)      (AVS_IS_Y(vi)   && AVS_BITS_PER_COMPONENT(vi) > 8 && AVS_BITS_PER_COMPONENT(vi) <= 16)
 
 /* load the library and functions we require from it */
 static int custom_avs_load_library( avs_hnd_t *h, cli_input_opt_t *opt )
 {
 #ifdef _WIN32
-    libp_t* library_path = L"avisynth";
-    libp_t* tmp_buf;
+    libp_t *library_path = L"avisynth";
+    libp_t *tmp_buf = NULL;
 #else
 #if SYS_MACOSX
-    libp_t* library_path = "libavisynth.dylib";
+    libp_t *library_path = "libavisynth.dylib";
 #else
-    libp_t* library_path = "libavisynth.so";
+    libp_t *library_path = "libavisynth.so";
 #endif
 #endif
-    if ( opt->frameserver_lib_path )
+
+    if( opt->frameserver_lib_path )
     {
 #ifdef _WIN32
         int size_needed = MultiByteToWideChar( CP_UTF8, 0, opt->frameserver_lib_path, -1, NULL, 0 );
-        tmp_buf = malloc( size_needed * sizeof( libp_t ) );
-        MultiByteToWideChar( CP_UTF8, 0, opt->frameserver_lib_path, -1, ( LPWSTR )tmp_buf, size_needed );
+        tmp_buf = malloc( size_needed * sizeof(libp_t) );
+        if( !tmp_buf )
+            return -1;
+        MultiByteToWideChar( CP_UTF8, 0, opt->frameserver_lib_path, -1, (LPWSTR)tmp_buf, size_needed );
         library_path = tmp_buf;
 #else
         library_path = opt->frameserver_lib_path;
 #endif
-        x264_cli_log( "avs ", X264_LOG_INFO, "using external Avisynth library from: \"%s\" \n", opt->frameserver_lib_path );
+        x264_cli_log( "avs ", X264_LOG_INFO, "using external Avisynth library from: \"%s\"\n", opt->frameserver_lib_path );
     }
+
     h->library = avs_open( library_path );
+
 #ifdef _WIN32
-    if ( opt->frameserver_lib_path )
-    {
-        free(tmp_buf);
-    }
+    if( opt->frameserver_lib_path )
+        free( tmp_buf );
 #endif
-    if (!h->library)
+
+    if( !h->library )
         return -1;
+
     LOAD_AVS_FUNC( avs_clip_get_error, 0 );
     LOAD_AVS_FUNC( avs_create_script_environment, 0 );
     LOAD_AVS_FUNC( avs_delete_script_environment, 1 );
@@ -165,12 +203,13 @@ static int custom_avs_load_library( avs_hnd_t *h, cli_input_opt_t *opt )
     LOAD_AVS_FUNC( avs_release_value, 0 );
     LOAD_AVS_FUNC( avs_release_video_frame, 0 );
     LOAD_AVS_FUNC( avs_take_clip, 0 );
+    LOAD_AVS_FUNC( avs_set_to_clip, 0 );
     LOAD_AVS_FUNC( avs_is_yv24, 1 );
     LOAD_AVS_FUNC( avs_is_yv16, 1 );
     LOAD_AVS_FUNC( avs_is_yv12, 1 );
     LOAD_AVS_FUNC( avs_is_yv411, 1 );
     LOAD_AVS_FUNC( avs_is_y8, 1 );
-    // AviSynth+ extension
+
     LOAD_AVS_FUNC( avs_is_rgb48, 1 );
     LOAD_AVS_FUNC_ALIAS( avs_is_rgb48, "_avs_is_rgb48@4", 1 );
     LOAD_AVS_FUNC( avs_is_rgb64, 1 );
@@ -185,42 +224,24 @@ static int custom_avs_load_library( avs_hnd_t *h, cli_input_opt_t *opt )
     LOAD_AVS_FUNC( avs_get_pitch_p, 1 );
     LOAD_AVS_FUNC( avs_get_read_ptr_p, 1 );
     return 0;
+
 fail:
     avs_close( h->library );
     h->library = NULL;
     return -1;
 }
 
-#define AVS_IS_YV24( vi ) (h->func.avs_is_yv24 ? h->func.avs_is_yv24( vi ) : avs_is_yv24( vi ))
-#define AVS_IS_YV16( vi ) (h->func.avs_is_yv16 ? h->func.avs_is_yv16( vi ) : avs_is_yv16( vi ))
-#define AVS_IS_YV12( vi ) (h->func.avs_is_yv12 ? h->func.avs_is_yv12( vi ) : avs_is_yv12( vi ))
-#define AVS_IS_YV411( vi ) (h->func.avs_is_yv411 ? h->func.avs_is_yv411( vi ) : avs_is_yv411( vi ))
-#define AVS_IS_Y8( vi ) (h->func.avs_is_y8 ? h->func.avs_is_y8( vi ) : avs_is_y8( vi ))
-#define AVS_IS_AVISYNTHPLUS (h->func.avs_is_420 && h->func.avs_is_422 && h->func.avs_is_444)
-#define AVS_IS_420( vi ) (h->func.avs_is_420 ? h->func.avs_is_420( vi ) : AVS_IS_YV12( vi ))
-#define AVS_IS_422( vi ) (h->func.avs_is_422 ? h->func.avs_is_422( vi ) : AVS_IS_YV16( vi ))
-#define AVS_IS_444( vi ) (h->func.avs_is_444 ? h->func.avs_is_444( vi ) : AVS_IS_YV24( vi ))
-#define AVS_IS_RGB48( vi ) (h->func.avs_is_rgb48 && h->func.avs_is_rgb48( vi ))
-#define AVS_IS_RGB64( vi ) (h->func.avs_is_rgb64 && h->func.avs_is_rgb64( vi ))
-#define AVS_IS_Y( vi ) (h->func.avs_is_y ? h->func.avs_is_y( vi ) : AVS_IS_Y8( vi ))
-#define AVS_GET_PITCH_P( p, plane ) (h->func.avs_get_pitch_p ? h->func.avs_get_pitch_p( p, plane ) : avs_get_pitch_p( p, plane ))
-#define AVS_GET_READ_PTR_P( p, plane ) (h->func.avs_get_read_ptr_p ? h->func.avs_get_read_ptr_p( p, plane ) : avs_get_read_ptr_p( p, plane ))
-/* No need in separated bitdepth detection on Avs+ side, we'll just shift lesser depths later using y4m workaround */
-#define AVS_IS_YUV420_HBD(vi) (h->func.avs_is_420 && h->func.avs_is_420(vi) && (h->func.avs_bits_per_component(vi) > 8 && h->func.avs_bits_per_component(vi) <= 16))
-#define AVS_IS_YUV422_HBD(vi) (h->func.avs_is_422 && h->func.avs_is_422(vi) && (h->func.avs_bits_per_component(vi) > 8 && h->func.avs_bits_per_component(vi) <= 16))
-#define AVS_IS_YUV444_HBD(vi) (h->func.avs_is_444 && h->func.avs_is_444(vi) && (h->func.avs_bits_per_component(vi) > 8 && h->func.avs_bits_per_component(vi) <= 16))
-#define AVS_IS_Y_HBD( vi ) (h->func.avs_is_y && h->func.avs_is_y( vi ) && (h->func.avs_bits_per_component( vi ) > 8 && h->func.avs_bits_per_component( vi ) <= 16))
-
 /* generate a filter sequence to try based on the filename extension */
 static void avs_build_filter_sequence( char *filename_ext, const char *filter[AVS_MAX_SEQUENCE + 1] )
 {
     int i = 0;
-#if _WIN32
+#ifdef _WIN32
     const char *all_purpose[] = { "LWLibavVideoSource", "FFmpegSource2", "DSS2", "DirectShowSource", 0 };
     if( !strcasecmp( filename_ext, "avi" ) )
         filter[i++] = "AVISource";
-    if( !strcasecmp( filename_ext, "mp4" ) || !strcasecmp( filename_ext, "mov" ) || !strcasecmp(filename_ext, "qt") ||
-        !strcasecmp( filename_ext, "3gp" ) || !strcasecmp( filename_ext, "3g2") )
+    if( !strcasecmp( filename_ext, "mp4" ) || !strcasecmp( filename_ext, "mov" ) ||
+        !strcasecmp( filename_ext, "qt" )  || !strcasecmp( filename_ext, "3gp" ) ||
+        !strcasecmp( filename_ext, "3g2" ) )
         filter[i++] = "LSMASHVideoSource";
     if( !strcasecmp( filename_ext, "d2v" ) )
         filter[i++] = "MPEG2Source";
@@ -260,7 +281,7 @@ static char *utf16_to_ansi( const wchar_t *utf16 )
     int len = WideCharToMultiByte( CP_ACP, WC_NO_BEST_FIT_CHARS, utf16, -1, NULL, 0, NULL, &invalid );
     if( len && !invalid )
     {
-        char *ansi = malloc( len * sizeof( char ) );
+        char *ansi = malloc( len * sizeof(char) );
         if( ansi )
         {
             if( WideCharToMultiByte( CP_ACP, WC_NO_BEST_FIT_CHARS, utf16, -1, ansi, len, NULL, &invalid ) && !invalid )
@@ -277,14 +298,12 @@ static char *utf8_to_ansi( const char *filename )
     wchar_t *filename_utf16 = x264_utf8_to_utf16( filename );
     if( filename_utf16 )
     {
-        /* Check if the filename already is valid ANSI. */
         if( !(ansi = utf16_to_ansi( filename_utf16 )) )
         {
-            /* Check for a legacy 8.3 short filename. */
             int len = GetShortPathNameW( filename_utf16, NULL, 0 );
             if( len )
             {
-                wchar_t *short_utf16 = malloc( len * sizeof( wchar_t ) );
+                wchar_t *short_utf16 = malloc( len * sizeof(wchar_t) );
                 if( short_utf16 )
                 {
                     if( GetShortPathNameW( filename_utf16, short_utf16, len ) )
@@ -304,6 +323,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     FILE *fh = x264_fopen( psz_filename, "r" );
     if( !fh )
         return -1;
+
     int b_regular = x264_is_regular_file( fh );
     fclose( fh );
     FAIL_IF_ERROR( !b_regular, "AVS input is incompatible with non-regular file `%s'\n", psz_filename );
@@ -311,20 +331,23 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     avs_hnd_t *h = calloc( 1, sizeof(avs_hnd_t) );
     if( !h )
         return -1;
+
     FAIL_IF_ERROR( custom_avs_load_library( h, opt ), "failed to load avisynth\n" );
+
     h->env = h->func.avs_create_script_environment( AVS_INTERFACE_25 );
+    FAIL_IF_ERROR( !h->env, "failed to create avisynth script environment\n" );
+
     if( h->func.avs_get_error )
     {
         const char *error = h->func.avs_get_error( h->env );
         FAIL_IF_ERROR( error, "%s\n", error );
     }
+
     float avs_version = get_avs_version( h );
-    if( avs_version <= 0 )
-        return -1;
+    FAIL_IF_ERROR( avs_version <= 0, "invalid avisynth version\n" );
     x264_cli_log( "avs ", X264_LOG_DEBUG, "using avisynth version %.2f\n", avs_version );
 
 #ifdef _WIN32
-    /* Avisynth doesn't support Unicode filenames. */
     char *ansi_filename = utf8_to_ansi( psz_filename );
     FAIL_IF_ERROR( !ansi_filename, "invalid ansi filename\n" );
     AVS_Value arg = avs_new_value_string( ansi_filename );
@@ -332,7 +355,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     AVS_Value arg = avs_new_value_string( psz_filename );
 #endif
 
-    AVS_Value res;
+    AVS_Value res = avs_void;
     char *filename_ext = get_filename_extension( psz_filename );
 
     if( !strcasecmp( filename_ext, "avs" ) )
@@ -342,8 +365,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         free( ansi_filename );
 #endif
         FAIL_IF_ERROR( avs_is_error( res ), "%s\n", avs_as_error( res ) );
-        /* check if the user is using a multi-threaded script and apply distributor if necessary.
-           adapted from avisynth's vfw interface */
+
         AVS_Value mt_test = h->func.avs_invoke( h->env, "GetMTMode", avs_new_value_bool( 0 ), NULL );
         int mt_mode = avs_is_int( mt_test ) ? avs_as_int( mt_test ) : 0;
         h->func.avs_release_value( mt_test );
@@ -354,17 +376,17 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
             res = temp;
         }
     }
-    else /* non script file */
+    else
     {
-        /* AviSynth+ need explicit invoke of AutoloadPlugins() for registering plugins functions */
-         if ( h->func.avs_function_exists(h->env, "AutoloadPlugins") )
-         {
-             res = h->func.avs_invoke( h->env, "AutoloadPlugins", avs_new_value_array(NULL, 0), NULL );
-             if ( avs_is_error(res) )
-                 x264_cli_log( "avs ", X264_LOG_INFO, "AutoloadPlugins failed: %s\n", avs_as_string(res) );
-         }
-        /* cycle through known source filters to find one that works */
-        const char *filter[AVS_MAX_SEQUENCE+1] = { 0 };
+        if( h->func.avs_function_exists( h->env, "AutoloadPlugins" ) )
+        {
+            AVS_Value autoload_res = h->func.avs_invoke( h->env, "AutoloadPlugins", avs_new_value_array( NULL, 0 ), NULL );
+            if( avs_is_error( autoload_res ) )
+                x264_cli_log( "avs ", X264_LOG_INFO, "AutoloadPlugins failed: %s\n", avs_as_string( autoload_res ) );
+            h->func.avs_release_value( autoload_res );
+        }
+
+        const char *filter[AVS_MAX_SEQUENCE + 1] = { 0 };
         avs_build_filter_sequence( filename_ext, filter );
         int i;
         for( i = 0; filter[i]; i++ )
@@ -387,17 +409,24 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
                 break;
             }
             x264_cli_printf( X264_LOG_INFO, "failed\n" );
+            h->func.avs_release_value( res );
+            res = avs_void;
         }
 #ifdef _WIN32
         free( ansi_filename );
 #endif
         FAIL_IF_ERROR( !filter[i], "unable to find source filter to open `%s'\n", psz_filename );
     }
+
     FAIL_IF_ERROR( !avs_is_clip( res ), "`%s' didn't return a video clip\n", psz_filename );
+
     h->clip = h->func.avs_take_clip( res, h->env );
+    FAIL_IF_ERROR( !h->clip, "failed to take avisynth clip\n" );
+
     const AVS_VideoInfo *vi = h->func.avs_get_video_info( h->clip );
+    FAIL_IF_ERROR( !vi, "failed to get video info\n" );
     FAIL_IF_ERROR( !avs_has_video( vi ), "`%s' has no video data\n", psz_filename );
-    /* if the clip is made of fields instead of frames, call weave to make them frames */
+
     if( avs_is_field_based( vi ) )
     {
         x264_cli_log( "avs ", X264_LOG_WARNING, "detected fieldbased (separated) input, weaving to frames\n" );
@@ -407,15 +436,17 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
         info->interlaced = 1;
         info->tff = avs_is_tff( vi );
     }
+
 #if !HAVE_SWSCALE
-    /* if swscale is not available, convert the CSP if necessary */
-    FAIL_IF_ERROR( avs_version < 2.6f && (opt->output_csp == X264_CSP_I400 || opt->output_csp == X264_CSP_I422 || opt->output_csp == X264_CSP_I444),
+    FAIL_IF_ERROR( avs_version < 2.6f &&
+                   (opt->output_csp == X264_CSP_I400 || opt->output_csp == X264_CSP_I422 || opt->output_csp == X264_CSP_I444),
                    "avisynth >= 2.6 is required for i400/i422/i444 output\n" );
+
     if( (opt->output_csp == X264_CSP_I400 && !AVS_IS_Y( vi )) ||
         (opt->output_csp == X264_CSP_I420 && !AVS_IS_420( vi )) ||
         (opt->output_csp == X264_CSP_I422 && !AVS_IS_422( vi )) ||
         (opt->output_csp == X264_CSP_I444 && !AVS_IS_444( vi )) ||
-        (opt->output_csp == X264_CSP_RGB && !avs_is_rgb( vi )) )
+        (opt->output_csp == X264_CSP_RGB  && !avs_is_rgb( vi )) )
     {
         const char *csp;
         if( AVS_IS_AVISYNTHPLUS )
@@ -434,90 +465,102 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
                   opt->output_csp == X264_CSP_I444 ? "YV24" :
                   "RGB";
         }
+
         x264_cli_log( "avs ", X264_LOG_WARNING, "converting input clip to %s\n", csp );
+
         if( opt->output_csp != X264_CSP_I400 )
         {
-            FAIL_IF_ERROR( opt->output_csp < X264_CSP_I444 && (vi->width&1),
+            FAIL_IF_ERROR( opt->output_csp < X264_CSP_I444 && (vi->width & 1),
                            "input clip width not divisible by 2 (%dx%d)\n", vi->width, vi->height );
-            FAIL_IF_ERROR( opt->output_csp == X264_CSP_I420 && info->interlaced && (vi->height&3),
+            FAIL_IF_ERROR( opt->output_csp == X264_CSP_I420 && info->interlaced && (vi->height & 3),
                            "input clip height not divisible by 4 (%dx%d)\n", vi->width, vi->height );
-            FAIL_IF_ERROR( (opt->output_csp == X264_CSP_I420 || info->interlaced) && (vi->height&1),
+            FAIL_IF_ERROR( (opt->output_csp == X264_CSP_I420 || info->interlaced) && (vi->height & 1),
                            "input clip height not divisible by 2 (%dx%d)\n", vi->width, vi->height );
         }
+
         char conv_func[16];
         snprintf( conv_func, sizeof(conv_func), "ConvertTo%s", csp );
+
         AVS_Value arg_arr[3];
         const char *arg_name[3];
         int arg_count = 1;
         arg_arr[0] = res;
         arg_name[0] = NULL;
+
         if( opt->output_csp != X264_CSP_I400 )
         {
             arg_arr[arg_count] = avs_new_value_bool( info->interlaced );
             arg_name[arg_count] = "interlaced";
             arg_count++;
         }
-        /* if doing a rgb <-> yuv conversion then range is handled via 'matrix'. though it's only supported in 2.56+ */
+
         char matrix[7];
-        if( avs_version >= 2.56f && ((opt->output_csp == X264_CSP_RGB && avs_is_yuv( vi )) || (opt->output_csp != X264_CSP_RGB && avs_is_rgb( vi ))) )
+        if( avs_version >= 2.56f &&
+            ((opt->output_csp == X264_CSP_RGB && avs_is_yuv( vi )) ||
+             (opt->output_csp != X264_CSP_RGB && avs_is_rgb( vi ))) )
         {
-            // if converting from yuv, then we specify the matrix for the input, otherwise use the output's.
             int use_pc_matrix = avs_is_yuv( vi ) ? opt->input_range == RANGE_PC : opt->output_range == RANGE_PC;
             strcpy( matrix, use_pc_matrix ? "PC." : "Rec" );
             strcat( matrix, (vi->width > 1024 || vi->height > 576) ? "709" : "601" );
             arg_arr[arg_count] = avs_new_value_string( matrix );
             arg_name[arg_count] = "matrix";
             arg_count++;
-            // notification that the input range has changed to the desired one
             opt->input_range = opt->output_range;
         }
+
         AVS_Value res2 = h->func.avs_invoke( h->env, conv_func, avs_new_value_array( arg_arr, arg_count ), arg_name );
         FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert input clip to %s: %s\n", csp, avs_as_error( res2 ) );
         res = update_clip( h, &vi, res2, res );
     }
-    /* if swscale is not available, change the range if necessary. This only applies to YUV-based CSPs however */
+
     if( avs_is_yuv( vi ) && opt->output_range != RANGE_AUTO && ((opt->input_range == RANGE_PC) != opt->output_range) )
     {
         const char *levels = opt->output_range ? "TV->PC" : "PC->TV";
         x264_cli_log( "avs ", X264_LOG_WARNING, "performing %s conversion\n", levels );
+
         AVS_Value arg_arr[2];
         arg_arr[0] = res;
         arg_arr[1] = avs_new_value_string( levels );
         const char *arg_name[] = { NULL, "levels" };
+
         AVS_Value res2 = h->func.avs_invoke( h->env, "ColorYUV", avs_new_value_array( arg_arr, 2 ), arg_name );
         FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert range: %s\n", avs_as_error( res2 ) );
         res = update_clip( h, &vi, res2, res );
-        // notification that the input range has changed to the desired one
         opt->input_range = opt->output_range;
     }
 #endif
+
     if( opt->bit_depth > 8 && opt->bit_depth != opt->desired_bit_depth && opt->bit_depth != 16 )
     {
-        AVS_Value arg_arr[] = { res, avs_new_value_int( 0 ), avs_new_value_int( 0 ), avs_new_value_int( 0 ),
-                                     avs_new_value_int( 0 ), avs_new_value_int( 0 ),
-                                     avs_new_value_int( opt->bit_depth ), avs_new_value_int( 2 ),
-                                     avs_new_value_int( opt->desired_bit_depth ), avs_new_value_int( opt->desired_bit_depth > 8 ? 2 : 0 ) };
-        const char *arg_name[] = { NULL, "Y", "Cb", "Cr",
-                                          "grainY", "grainC",
-                                          "input_depth", "input_mode",
-                                          "output_depth", "output_mode" };
+        AVS_Value arg_arr[] = {
+            res,
+            avs_new_value_int( 0 ), avs_new_value_int( 0 ), avs_new_value_int( 0 ),
+            avs_new_value_int( 0 ), avs_new_value_int( 0 ),
+            avs_new_value_int( opt->bit_depth ), avs_new_value_int( 2 ),
+            avs_new_value_int( opt->desired_bit_depth ), avs_new_value_int( opt->desired_bit_depth > 8 ? 2 : 0 )
+        };
+        const char *arg_name[] = {
+            NULL, "Y", "Cb", "Cr",
+            "grainY", "grainC",
+            "input_depth", "input_mode",
+            "output_depth", "output_mode"
+        };
+
         AVS_Value res2 = h->func.avs_invoke( h->env, "f3kdb", avs_new_value_array( arg_arr, 10 ), arg_name );
-        x264_cli_log( "avs ", X264_LOG_WARNING, "performing bit depth conversion using f3kdb: %d->%d\n", opt->bit_depth, opt->desired_bit_depth );
+        x264_cli_log( "avs ", X264_LOG_WARNING, "performing bit depth conversion using f3kdb: %d->%d\n",
+                      opt->bit_depth, opt->desired_bit_depth );
         FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert bit depth: %s\n", avs_as_error( res2 ) );
         res = update_clip( h, &vi, res2, res );
-        // notification that the input bit depth has changed to the desired one
         opt->bit_depth = opt->desired_bit_depth;
     }
 
-    h->func.avs_release_value( res );
-
-    info->width   = vi->width;
-    info->height  = vi->height;
+    info->width = vi->width;
+    info->height = vi->height;
     info->fps_num = vi->fps_numerator;
     info->fps_den = vi->fps_denominator;
     h->num_frames = info->num_frames = vi->num_frames;
-    h->bit_depth = h->func.avs_bits_per_component( vi );
-    h->cmp_size = h->func.avs_component_size( vi );
+    h->bit_depth = AVS_BITS_PER_COMPONENT( vi );
+    h->cmp_size = AVS_COMPONENT_SIZE( vi );
     h->uc_depth = h->bit_depth & 7;
 
     info->thread_safe = 1;
@@ -553,27 +596,32 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
 #endif
     else
     {
-        AVS_Value pixel_type = h->func.avs_invoke( h->env, "PixelType", res, NULL );
+        AVS_Value clip_value = avs_void;
+        h->func.avs_set_to_clip( &clip_value, h->clip );
+        AVS_Value pixel_type = h->func.avs_invoke( h->env, "PixelType", clip_value, NULL );
         const char *pixel_type_name = avs_is_string( pixel_type ) ? avs_as_string( pixel_type ) : "unknown";
+        if( !avs_is_error( pixel_type ) )
+            h->func.avs_release_value( pixel_type );
+        h->func.avs_release_value( res );
         FAIL_IF_ERROR( 1, "not supported pixel type: %s\n", pixel_type_name );
     }
+
+    h->func.avs_release_value( res );
+
     info->vfr = 0;
     if( !opt->b_accurate_fps )
         x264_ntsc_fps( &info->fps_num, &info->fps_den );
 
     h->desired_bit_depth = opt->desired_bit_depth;
 
-    if (opt->bit_depth > 8 && !(info->csp & X264_CSP_HIGH_DEPTH))
+    if( opt->bit_depth > 8 && !(info->csp & X264_CSP_HIGH_DEPTH) )
     {
-        FAIL_IF_ERROR(info->width & 3, "avisynth 16bit hack requires that width is at least mod4\n");
-        x264_cli_log("avs ", X264_LOG_INFO, "avisynth 16bit hack enabled\n");
+        FAIL_IF_ERROR( info->width & 3, "avisynth 16bit hack requires that width is at least mod4\n" );
+        x264_cli_log( "avs ", X264_LOG_INFO, "avisynth 16bit hack enabled\n" );
         info->csp |= X264_CSP_HIGH_DEPTH;
         info->width >>= 1;
         if( opt->bit_depth == h->desired_bit_depth )
-        {
-            /* HACK: totally skips depth filter to prevent dither error */
             info->csp |= X264_CSP_SKIP_DEPTH_FILTER;
-        }
     }
 
     *p_handle = h;
@@ -584,6 +632,7 @@ static int picture_alloc( cli_pic_t *pic, hnd_t handle, int csp, int width, int 
 {
     if( x264_cli_pic_alloc( pic, X264_CSP_NONE, width, height ) )
         return -1;
+
     pic->img.csp = csp;
     const x264_cli_csp_t *cli_csp = x264_cli_get_csp( csp );
     if( cli_csp )
@@ -592,7 +641,7 @@ static int picture_alloc( cli_pic_t *pic, hnd_t handle, int csp, int width, int 
     else if( csp == (AV_PIX_FMT_YUV411P | X264_CSP_OTHER) )
         pic->img.planes = 3;
     else
-        pic->img.planes = 1; //y8 and yuy2 are one plane
+        pic->img.planes = 1;
 #endif
     return 0;
 }
@@ -601,24 +650,28 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
 {
     static const int planes[3] = { AVS_PLANAR_Y, AVS_PLANAR_U, AVS_PLANAR_V };
     avs_hnd_t *h = handle;
+
     if( i_frame >= h->num_frames )
         return -1;
+
     AVS_VideoFrame *frm = pic->opaque = h->func.avs_get_frame( h->clip, i_frame );
     const char *err = h->func.avs_clip_get_error( h->clip );
     FAIL_IF_ERROR( err, "%s occurred while reading frame %d\n", err, i_frame );
+
     for( int i = 0; i < pic->img.planes; i++ )
     {
         pic->img.plane[i] = (uint8_t*)AVS_GET_READ_PTR_P( frm, planes[i] );
         pic->img.stride[i] = AVS_GET_PITCH_P( frm, planes[i] );
 
-        if (h->uc_depth && h->bit_depth != h->desired_bit_depth )
+        if( h->uc_depth && h->bit_depth != h->desired_bit_depth )
         {
             /* upconvert non 16bit high depth planes to 16bit using the same
              * algorithm as used in the depth filter. */
-            uint16_t * plane = (uint16_t*)pic->img.plane[i];
-            int plane_height = h->func.avs_get_height_p( frm, planes[i] );
+            uint16_t *plane = (uint16_t*)pic->img.plane[i];
+            int plane_height = AVS_GET_HEIGHT_P( frm, planes[i] );
             int row_pixels = pic->img.stride[i] / h->cmp_size;
             int lshift = 16 - h->bit_depth;
+
             for( int y = 0; y < plane_height; y++ )
             {
                 uint16_t *row = plane + (size_t)y * row_pixels;
@@ -627,6 +680,7 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
             }
         }
     }
+
     return 0;
 }
 
