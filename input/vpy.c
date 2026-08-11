@@ -69,8 +69,7 @@ static inline int vpy_atomic_fetch_sub(vpy_atomic_t *object, int x)
 }
 #endif
 
-#include "extras/VSScript4.h"
-#include "extras/VSHelper4.h"
+#include "extras/VapourSynth4.h"
 
 #ifdef _WIN32
 typedef WCHAR libp_t;
