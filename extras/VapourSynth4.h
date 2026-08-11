@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2012-2021 Fredrik Mellbin
+* Copyright (c) 2012-2026 Fredrik Mellbin
 *
 * This file is part of VapourSynth.
 *
@@ -26,7 +26,9 @@
 
 #define VS_MAKE_VERSION(major, minor) (((major) << 16) | (minor))
 #define VAPOURSYNTH_API_MAJOR 4
-#if defined(VS_USE_LATEST_API) || defined(VS_USE_API_41)
+#if defined(VS_USE_LATEST_API) || defined(VS_USE_API_42)
+#define VAPOURSYNTH_API_MINOR 2
+#elif defined(VS_USE_API_41)
 #define VAPOURSYNTH_API_MINOR 1
 #else
 #define VAPOURSYNTH_API_MINOR 0
@@ -133,9 +135,20 @@ typedef enum VSPresetVideoFormat {
     pfYUV422P14 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 14, 1, 0),
     pfYUV444P14 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 14, 0, 0),
 
+    pfYUV410P16 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 16, 2, 2),
+    pfYUV411P16 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 16, 2, 0),
+    pfYUV440P16 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 16, 0, 1),
+
     pfYUV420P16 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 16, 1, 1),
     pfYUV422P16 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 16, 1, 0),
     pfYUV444P16 = VS_MAKE_VIDEO_ID(cfYUV, stInteger, 16, 0, 0),
+
+    pfYUV410PH = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 16, 2, 2),
+    pfYUV410PS = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 32, 2, 2),
+    pfYUV411PH = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 16, 2, 0),
+    pfYUV411PS = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 32, 2, 0),
+    pfYUV440PH = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 16, 0, 1),
+    pfYUV440PS = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 32, 0, 1),
 
     pfYUV420PH = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 16, 1, 1),
     pfYUV420PS = VS_MAKE_VIDEO_ID(cfYUV, stFloat, 32, 1, 1),
@@ -160,7 +173,7 @@ typedef enum VSPresetVideoFormat {
 
 typedef enum VSFilterMode {
     fmParallel = 0, /* completely parallel execution */
-    fmParallelRequests = 1, /* for filters that are serial in nature but can request one or more frames they need in advance */
+    fmParallelRequests = 1, /* for filters that are single-threaded in nature but can request one or more frames they need in advance */
     fmUnordered = 2, /* for filters that modify their internal state every request like source filters that read a file */
     fmFrameState = 3 /* DO NOT USE UNLESS ABSOLUTELY NECESSARY, for compatibility with external code that can only keep the processing state of a single frame at a time */
 } VSFilterMode;
@@ -252,6 +265,16 @@ typedef struct VSCoreInfo {
     int64_t usedFramebufferSize;
 } VSCoreInfo;
 
+typedef struct VSCoreInfo2 {
+    const char *versionString;
+    int coreVersion;
+    int apiVersion;
+    int creationFlags;
+    int numThreads;
+    int64_t maxFramebufferSize;
+    int64_t usedFramebufferSize;
+} VSCoreInfo2;
+
 typedef struct VSVideoInfo {
     VSVideoFormat format;
     int64_t fpsNum;
@@ -285,7 +308,8 @@ typedef enum VSMessageType {
 typedef enum VSCoreCreationFlags {
     ccfEnableGraphInspection = 1,
     ccfDisableAutoLoading = 2,
-    ccfDisableLibraryUnloading = 4
+    ccfDisableLibraryUnloading = 4,
+    ccfEnableFrameRefDebug = 8
 } VSCoreCreationFlags;
 
 typedef enum VSPluginConfigFlags {
@@ -465,7 +489,7 @@ struct VSAPI {
 
     /* Core and information */
     VSCore *(VS_CC *createCore)(int flags) VS_NOEXCEPT; /* flags uses the VSCoreCreationFlags enum */
-    void (VS_CC *freeCore)(VSCore *core) VS_NOEXCEPT; /* only call this function after all node, frame and function references belonging to the core have been freed */
+    void (VS_CC *freeCore)(VSCore *core) VS_NOEXCEPT; /* only call this function after all node, frame and function references belonging to the core have been freed, references that erroneously outlive the core must at least be released one at a time and not concurrently from multiple threads */
     int64_t (VS_CC *setMaxCacheSize)(int64_t bytes, VSCore *core) VS_NOEXCEPT; /* the total cache size at which vapoursynth more aggressively tries to reclaim memory, it is not a hard limit */
     int (VS_CC *setThreadCount)(int threads, VSCore *core) VS_NOEXCEPT; /* setting threads to 0 means automatic detection */
     void (VS_CC *getCoreInfo)(VSCore *core, VSCoreInfo *info) VS_NOEXCEPT;
@@ -473,7 +497,7 @@ struct VSAPI {
 
     /* Message handler */
     void (VS_CC *logMessage)(int msgType, const char *msg, VSCore *core) VS_NOEXCEPT;
-    VSLogHandle *(VS_CC *addLogHandler)(VSLogHandler handler, VSLogHandlerFree free, void *userData, VSCore *core) VS_NOEXCEPT; /* free and userData can be NULL, returns a handle that can be passed to removeLogHandler */
+    VSLogHandle *(VS_CC *addLogHandler)(VSLogHandler handler, VSLogHandlerFree free, void *userData, VSCore *core) VS_NOEXCEPT; /* free and userData can be NULL, returns a handle that can be passed to removeLogHandler, handlers must only pass the message on and return quickly, calling logMessage is allowed but no other api function and a handler must never add or remove log handlers or wait for frame requests to complete */
     int (VS_CC *removeLogHandler)(VSLogHandle *handle, VSCore *core) VS_NOEXCEPT; /* returns non-zero if successfully removed */
     
     /* Added in API 4.1, mostly graph and node inspection, PLEASE DON'T USE INSIDE FILTERS */
@@ -494,6 +518,10 @@ struct VSAPI {
     int64_t (VS_CC *getNodeProcessingTime)(VSNode *node, int reset) VS_NOEXCEPT; /* time spent processing frames in nanoseconds, reset sets the counter to 0 again */
     int64_t (VS_CC *getFreedNodeProcessingTime)(VSCore *core, int reset) VS_NOEXCEPT; /* time spent processing frames in nanoseconds in all destroyed nodes, reset sets the counter to 0 again */
 
+    /* Added in API 4.2 */
+#if VAPOURSYNTH_API_MINOR >= 2
+    void (VS_CC *getCoreInfo2)(VSCore *core, VSCoreInfo2 *info) VS_NOEXCEPT;
+
 #if defined(VS_GRAPH_API)
     /* !!! Experimental/expensive graph information, these function require both the major and minor version to match exactly when using them !!!
      * 
@@ -504,7 +532,10 @@ struct VSAPI {
      */
 
     const char *(VS_CC *getNodeCreationFunctionName)(VSNode *node, int level) VS_NOEXCEPT; /* level=0 returns the name of the function that created the filter, specifying a higher level will retrieve the function above that invoked it or NULL if a non-existent level is requested */
+    const char *(VS_CC *getNodeCreationPluginID)(VSNode *node, int level) VS_NOEXCEPT; /* level=0 returns the name of the function that created the filter, specifying a higher level will retrieve the function above that invoked it or NULL if a non-existent level is requested */
+    const char *(VS_CC *getNodeCreationPluginNS)(VSNode *node, int level) VS_NOEXCEPT; /* level=0 returns the name of the function that created the filter, specifying a higher level will retrieve the function above that invoked it or NULL if a non-existent level is requested */
     const VSMap *(VS_CC *getNodeCreationFunctionArguments)(VSNode *node, int level) VS_NOEXCEPT; /* level=0 returns a copy of the arguments passed to the function that created the filter, returns NULL if a non-existent level is requested */
+#endif
 #endif
 #endif
 };
