@@ -1766,7 +1766,8 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     x264_log( h, X264_LOG_INFO, "built with MSVC %d\n", _MSC_VER );
 #else
     x264_log( h, X264_LOG_INFO, "built with unknown compiler\n" );
-#endif    x264_log( h, X264_LOG_INFO, "%s\n", buf );
+#endif
+    x264_log( h, X264_LOG_INFO, "%s\n", buf );
 
     if( x264_analyse_init_costs( h ) )
         goto fail;
